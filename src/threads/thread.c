@@ -28,6 +28,10 @@ static struct list ready_list;
    when they are first scheduled and removed when they exit. */
 static struct list all_list;
 
+/* List of processes in THREAD_BLOCKED state, that is, processes
+   that are slept. */
+static struct list sleep_list;
+
 /* Idle thread. */
 static struct thread *idle_thread;
 
@@ -49,6 +53,9 @@ struct kernel_thread_frame
 static long long idle_ticks;    /* # of timer ticks spent idle. */
 static long long kernel_ticks;  /* # of timer ticks in kernel threads. */
 static long long user_ticks;    /* # of timer ticks in user programs. */
+
+/* global ticks. */
+static int64_t min_ticks;       /* minimum ticks among ticks in sleep_list */
 
 /* Scheduling. */
 #define TIME_SLICE 4            /* # of timer ticks to give each thread. */
@@ -72,6 +79,19 @@ static void schedule (void);
 void thread_schedule_tail (struct thread *prev);
 static tid_t allocate_tid (void);
 
+/* Compares the value of two list elements A and B, given
+   auxiliary data AUX.  Returns true if A is less than B, or
+   false if A is greater than or equal to B. */
+
+static bool
+less(const struct list_elem *a, const struct list_elem *b, void *aux)
+{
+  ASSERT(a != NULL);
+  ASSERT(b != NULL);
+  
+}
+  
+
 /* Initializes the threading system by transforming the code
    that's currently running into a thread.  This can't work in
    general and it is possible in this case only because loader.S
@@ -93,6 +113,7 @@ thread_init (void)
   lock_init (&tid_lock);
   list_init (&ready_list);
   list_init (&all_list);
+  list_init (&sleep_list);
 
   /* Set up a thread structure for the running thread. */
   initial_thread = running_thread ();
@@ -116,6 +137,25 @@ thread_start (void)
 
   /* Wait for the idle thread to initialize idle_thread. */
   sema_down (&idle_started);
+}
+
+/* Change the state of the caller thread to  "blocked" and put
+   it to the sleep queue. */
+void thread_sleep(int64_t ticks)
+{
+  struct thread *t = thread_current ();
+
+  enum intr_level old_level;
+  old_level = intr_disable();
+
+  ASSERT(t != idle_thread);
+  t->status = THREAD_BLOCKED;
+
+  
+
+  intr_set_level(old_level);
+
+
 }
 
 /* Called by the timer interrupt handler at each timer tick.
