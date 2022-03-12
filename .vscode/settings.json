@@ -1,0 +1,10 @@
+{
+    "files.associations": {
+        "*.tcc": "c",
+        "string": "c",
+        "fstream": "c",
+        "istream": "c",
+        "cmath": "c",
+        "tuple": "c"
+    }
+}

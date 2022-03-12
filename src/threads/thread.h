@@ -24,6 +24,9 @@ typedef int tid_t;
 #define PRI_DEFAULT 31                  /* Default priority. */
 #define PRI_MAX 63                      /* Highest priority. */
 
+/* global min ticks */
+int64_t min_ticks;
+
 /* A kernel thread or user process.
 
    Each thread structure is stored in its own 4 kB page.  The
@@ -111,6 +114,8 @@ extern bool thread_report_latency;
 
 void thread_init (void);
 void thread_start (void);
+void thread_sleep(int64_t ticks);
+void thread_wakeup(int64_t ticks);
 
 void thread_tick (void);
 void thread_print_stats (void);
