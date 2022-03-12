@@ -54,9 +54,6 @@ static long long idle_ticks;    /* # of timer ticks spent idle. */
 static long long kernel_ticks;  /* # of timer ticks in kernel threads. */
 static long long user_ticks;    /* # of timer ticks in user programs. */
 
-/* global ticks. */
-int64_t min_ticks = -1000000;       /* minimum ticks among ticks in sleep_list */
-
 /* Scheduling. */
 #define TIME_SLICE 4            /* # of timer ticks to give each thread. */
 static unsigned thread_ticks;   /* # of timer ticks since last yield. */
@@ -84,21 +81,35 @@ static tid_t allocate_tid (void);
    less than B, or false if A is greater than or equal to B. */
 
 static bool
-less(const struct list_elem *a, const struct list_elem *b, void *aux)
+less(const struct list_elem *a, const struct list_elem *b, void *aux UNUSED)
 {
   ASSERT(a != NULL);
   ASSERT(b != NULL);
-  aux = (int *)aux;
   struct thread *a_thread = list_entry(a,struct thread,elem);
   struct thread *b_thread = list_entry(b,struct thread,elem);
   return (a_thread->wakeup_ticks < b_thread->wakeup_ticks) ? true : false;
 }
 
+/* Compares the value of priority of threads which contains two list 
+   elements A and B each, given auxiliary data AUX.  Returns true if A is
+   less than B, or false if A is greater than or equal to B. */
+
+static bool
+cmp_priority(const struct list_elem *a, const struct list_elem *b, void *aux UNUSED)
+{
+  ASSERT(a != NULL);
+  ASSERT(b != NULL);
+  struct thread *a_thread = list_entry(a,struct thread,elem);
+  struct thread *b_thread = list_entry(b,struct thread,elem);
+  return (a_thread->priority > b_thread->priority) ? true : false;
+}
+
+
 /* Wake up the threads whose wakeup_ticks are less or equal to
    timer ticks */
-void thread_wakeup(int64_t ticks)
+void thread_wakeup(int64_t w_ticks)
 {
-  ASSERT(ticks>=0);
+  ASSERT(w_ticks>=0);
 
   enum intr_level old_level;
   old_level = intr_disable();
@@ -107,16 +118,15 @@ void thread_wakeup(int64_t ticks)
   while(start != list_end(&sleep_list))
   {
     struct thread *t = list_entry(start,struct thread,elem);
-    if(t->wakeup_ticks <= ticks)
+    if(t->wakeup_ticks <= w_ticks)
     {
       list_pop_front(&sleep_list);
       thread_unblock(t);
-      start = list_next(start);
-      if(start == list_tail(&sleep_list))
-        /* if there is no thread in sleep_list */
-        min_ticks = -1000000;
-      else
+      start = list_begin(&sleep_list);
+      if(start != list_end(&sleep_list))
         min_ticks = list_entry(start,struct thread,elem)->wakeup_ticks;
+      else
+        min_ticks = INT64_MAX;
     }
     else
       break;
@@ -187,8 +197,8 @@ void thread_sleep(int64_t ticks)
 
   ASSERT(t != idle_thread);
   t->wakeup_ticks = ticks;
-  list_insert_ordered(&sleep_list,&(t->elem),less,NULL);
-  min_ticks = list_entry(list_begin(&sleep_list),struct thread, elem)->wakeup_ticks;
+  list_insert_ordered(&sleep_list,&(t->elem),&less,NULL);
+  min_ticks = list_entry(list_begin(&sleep_list),struct thread,elem)->wakeup_ticks;
   thread_block();
 
   intr_set_level(old_level);
@@ -278,6 +288,13 @@ thread_create (const char *name, int priority,
   /* Add to run queue. */
   thread_unblock (t);
 
+  /* compare the priorities of the currently running thread and
+     the newly inserted one. Yield the CPU if the newly arriving
+     thread has higher priority */
+  struct thread *cur = thread_current();
+  if(cur->priority < t->priority)
+    thread_yield();
+
   return tid;
 }
 
@@ -314,7 +331,7 @@ thread_unblock (struct thread *t)
 
   old_level = intr_disable ();
   ASSERT (t->status == THREAD_BLOCKED);
-  list_push_back (&ready_list, &t->elem);
+  list_insert_ordered(&ready_list, &t->elem, &cmp_priority, NULL);
   t->status = THREAD_READY;
   intr_set_level (old_level);
 }
@@ -385,7 +402,7 @@ thread_yield (void)
 
   old_level = intr_disable ();
   if (cur != idle_thread) 
-    list_push_back (&ready_list, &cur->elem);
+    list_insert_ordered(&ready_list, &cur->elem, &cmp_priority, NULL);
   cur->status = THREAD_READY;
   schedule ();
   intr_set_level (old_level);
@@ -408,11 +425,20 @@ thread_foreach (thread_action_func *func, void *aux)
     }
 }
 
-/* Sets the current thread's priority to NEW_PRIORITY. */
+/* Sets the current thread's priority to NEW_PRIORITY. and if current
+   thread priority is less than max_priority in ready_list, then yield() */
 void
 thread_set_priority (int new_priority) 
 {
   thread_current ()->priority = new_priority;
+  if(!list_empty(&ready_list))
+  {
+    int cur_priority = thread_current()->priority;
+    struct thread *t = list_entry(list_begin(&ready_list),struct thread,elem);
+    if(cur_priority < t->priority)
+      thread_yield();
+  }
+  list_sort(&ready_list,&cmp_priority,NULL);
 }
 
 /* Returns the current thread's priority. */
@@ -540,6 +566,10 @@ init_thread (struct thread *t, const char *name, int priority)
   t->stack = (uint8_t *) t + PGSIZE;
   t->priority = priority;
   t->magic = THREAD_MAGIC;
+  /* initialize the variables that use in priority donation */
+  t->rep_priority = priority;
+  list_init(&(t->donation));
+  t->wait_on_lock = NULL;
 
   old_level = intr_disable ();
   list_push_back (&all_list, &t->allelem);

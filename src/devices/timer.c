@@ -173,7 +173,7 @@ timer_interrupt (struct intr_frame *args UNUSED)
 {
   ticks++;
   thread_tick ();
-  if(min_ticks>0 && min_ticks<=ticks)
+  if(min_ticks<=ticks)
     thread_wakeup(ticks);
 }
 

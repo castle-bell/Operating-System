@@ -32,6 +32,20 @@
 #include "threads/interrupt.h"
 #include "threads/thread.h"
 
+/* Compares the value of priority of threads which contains two list 
+   elements A and B each, given auxiliary data AUX.  Returns true if A is
+   less than B, or false if A is greater than or equal to B. */
+
+static bool
+cmp_priority(const struct list_elem *a, const struct list_elem *b, void *aux UNUSED)
+{
+  ASSERT(a != NULL);
+  ASSERT(b != NULL);
+  struct thread *a_thread = list_entry(a,struct thread,elem);
+  struct thread *b_thread = list_entry(b,struct thread,elem);
+  return (a_thread->priority > b_thread->priority) ? true : false;
+}
+
 /* Initializes semaphore SEMA to VALUE.  A semaphore is a
    nonnegative integer along with two atomic operators for
    manipulating it:
@@ -68,7 +82,7 @@ sema_down (struct semaphore *sema)
   old_level = intr_disable ();
   while (sema->value == 0) 
     {
-      list_push_back (&sema->waiters, &thread_current ()->elem);
+      list_insert_ordered (&sema->waiters, &thread_current()->elem, &cmp_priority, NULL);
       thread_block ();
     }
   sema->value--;

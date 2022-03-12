@@ -24,7 +24,7 @@ typedef int tid_t;
 #define PRI_DEFAULT 31                  /* Default priority. */
 #define PRI_MAX 63                      /* Highest priority. */
 
-/* global min ticks */
+/* global min_ticks */
 int64_t min_ticks;
 
 /* A kernel thread or user process.
@@ -95,7 +95,10 @@ struct thread
     struct list_elem allelem;           /* List element for all threads list. */
 
     /* Shared between thread.c and synch.c. */
+    int rep_priority;                   /* store the origin priority */
     struct list_elem elem;              /* List element. */
+    struct list donation;               /* List of donors. */
+    struct lock *wait_on_lock;          /* lock that it waits for */
 
 #ifdef USERPROG
     /* Owned by userprog/process.c. */
