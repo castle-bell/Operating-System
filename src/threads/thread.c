@@ -104,6 +104,17 @@ cmp_priority(const struct list_elem *a, const struct list_elem *b, void *aux UNU
   return (a_thread->priority > b_thread->priority) ? true : false;
 }
 
+/* Preemption if the highest priority of ready list is bigger than
+   the priority of running thread */
+void preemption(void)
+{
+  if(!list_empty(&ready_list))
+  {
+    struct thread *cmp = list_entry(list_begin(&ready_list),struct thread, elem);
+    if(thread_current()->priority < cmp->priority)
+      thread_yield();
+  }
+}
 
 /* Wake up the threads whose wakeup_ticks are less or equal to
    timer ticks */
@@ -291,9 +302,7 @@ thread_create (const char *name, int priority,
   /* compare the priorities of the currently running thread and
      the newly inserted one. Yield the CPU if the newly arriving
      thread has higher priority */
-  struct thread *cur = thread_current();
-  if(cur->priority < t->priority)
-    thread_yield();
+  preemption();
 
   return tid;
 }
@@ -430,14 +439,15 @@ thread_foreach (thread_action_func *func, void *aux)
 void
 thread_set_priority (int new_priority) 
 {
-  thread_current ()->priority = new_priority;
-  if(!list_empty(&ready_list))
-  {
-    int cur_priority = thread_current()->priority;
-    struct thread *t = list_entry(list_begin(&ready_list),struct thread,elem);
-    if(cur_priority < t->priority)
-      thread_yield();
-  }
+  struct thread *cur = thread_current ();
+  cur->priority = new_priority;
+
+  /* Priority donation can occurs */
+  if(cur->wait_on_lock != NULL)
+    priority_donation(cur->wait_on_lock,cur);
+
+  preemption();
+  
   list_sort(&ready_list,&cmp_priority,NULL);
 }
 

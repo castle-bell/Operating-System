@@ -93,12 +93,13 @@ struct thread
     int priority;                       /* Priority. */
     int64_t wakeup_ticks;              /* the ticks that thread have to wake up */
     struct list_elem allelem;           /* List element for all threads list. */
+    struct list_elem elem;              /* List element. */
 
     /* Shared between thread.c and synch.c. */
     int rep_priority;                   /* store the origin priority */
-    struct list_elem elem;              /* List element. */
     struct list donation;               /* List of donors. */
     struct lock *wait_on_lock;          /* lock that it waits for */
+    struct list_elem donation_elem;            /* list element of donors */
 
 #ifdef USERPROG
     /* Owned by userprog/process.c. */
@@ -119,6 +120,7 @@ void thread_init (void);
 void thread_start (void);
 void thread_sleep(int64_t ticks);
 void thread_wakeup(int64_t ticks);
+void preemption(void);
 
 void thread_tick (void);
 void thread_print_stats (void);

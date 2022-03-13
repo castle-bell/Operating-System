@@ -46,6 +46,56 @@ cmp_priority(const struct list_elem *a, const struct list_elem *b, void *aux UNU
   return (a_thread->priority > b_thread->priority) ? true : false;
 }
 
+static bool
+cmp_d_priority(const struct list_elem *a, const struct list_elem *b, void *aux UNUSED)
+{
+  ASSERT(a != NULL);
+  ASSERT(b != NULL);
+  struct thread *a_thread = list_entry(a,struct thread,donation_elem);
+  struct thread *b_thread = list_entry(b,struct thread,donation_elem);
+  return (a_thread->priority > b_thread->priority) ? true : false;
+}
+
+/* Donate the priority of cur to the lock holder if the priority of lock_ holder is
+   less than the priority of cur */
+void priority_donation(struct lock *cur_wait_lock,struct thread *cur)
+{
+  if(cur_wait_lock == NULL)
+    return;
+  if(cur_wait_lock->holder == NULL)
+    return;
+  struct thread *lockhd = cur_wait_lock->holder;
+  if(lockhd->priority >=cur->priority)
+    return;
+  /* donation */
+  lockhd->priority = cur->priority;
+  list_insert_ordered(&lockhd->donation,&cur->donation_elem, cmp_d_priority, NULL);
+  priority_donation(lockhd->wait_on_lock, lockhd);
+}
+
+void priority_withdrawal(struct lock *lock_)
+{
+  /* withdraw the priority cur donates */
+  struct thread *lockhd = thread_current();
+  struct list_elem *e = list_begin(&lockhd->donation);
+  while(e != list_end(&lockhd->donation))
+  {
+    /* Find the thread that waits for lock_ and remove in donation */
+    if((list_entry(e,struct thread,donation_elem)->wait_on_lock) == lock_)
+      e = list_remove(e);
+    else
+      e = list_next(e);
+  }
+  /* set the priority properly */
+  lockhd->priority = lockhd->rep_priority;
+  if(!list_empty(&lockhd->donation))
+  {
+    struct thread *first = list_entry(list_begin(&lockhd->donation),struct thread, donation_elem);
+    if(first->priority > lockhd->priority)
+      lockhd->priority = first->priority;
+  }
+}
+
 /* Initializes semaphore SEMA to VALUE.  A semaphore is a
    nonnegative integer along with two atomic operators for
    manipulating it:
@@ -127,10 +177,17 @@ sema_up (struct semaphore *sema)
   ASSERT (sema != NULL);
 
   old_level = intr_disable ();
-  if (!list_empty (&sema->waiters)) 
+  if (!list_empty (&sema->waiters))
+  {
+    list_sort(&sema->waiters,cmp_priority,NULL);
     thread_unblock (list_entry (list_pop_front (&sema->waiters),
                                 struct thread, elem));
+  }
   sema->value++;
+
+  /* Preemption */
+  preemption();
+
   intr_set_level (old_level);
 }
 
@@ -210,8 +267,17 @@ lock_acquire (struct lock *lock)
   ASSERT (!intr_context ());
   ASSERT (!lock_held_by_current_thread (lock));
 
+  /* donate priority */
+  if(lock->holder != NULL)
+  {
+    struct thread *cur = thread_current();
+    cur->wait_on_lock = lock;
+    priority_donation(lock,cur);
+  }
+  
   sema_down (&lock->semaphore);
   lock->holder = thread_current ();
+  thread_current()->wait_on_lock = NULL;
 }
 
 /* Tries to acquires LOCK and returns true if successful or false
@@ -244,7 +310,13 @@ lock_release (struct lock *lock)
 {
   ASSERT (lock != NULL);
   ASSERT (lock_held_by_current_thread (lock));
+  struct thread *cur = thread_current();
+  /* Plus case */
+  ASSERT(cur->wait_on_lock == NULL);
 
+ 
+  /* withdrawal priority */
+  priority_withdrawal(lock);
   lock->holder = NULL;
   sema_up (&lock->semaphore);
 }
