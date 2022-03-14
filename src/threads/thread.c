@@ -116,6 +116,38 @@ void preemption(void)
   }
 }
 
+static int count_size(struct list *lst)
+{
+  struct list_elem *e = list_begin(lst);
+  int i = 0;
+  for(e;e!=list_end(lst);e=list_next(e))
+  {
+    i++;
+  }
+  return i;
+}
+
+/* Print the thread elements */
+void print_thread(struct thread *t, struct lock *lock)
+{
+  printf("@@@@@@@@@@@@@@@@\n");
+  printf("Thread name is [%s]\n", t->name);
+  printf("Thread priority is [%d]\n", t->priority);
+  printf("Thread rep_priority is [%d]\n", t->rep_priority);
+  if(t->wait_on_lock != NULL)
+    printf("Thread wait_on_lock is the lock the thread[%s] have\n",
+    t->wait_on_lock->holder);
+  else
+    printf("Thread doesn't wait the lock\n");
+  printf("Thread's donation list size is [%d]\n",count_size(&t->donation));
+  if(lock->holder == NULL){
+    printf("There is no lock holder\n");
+  }
+  printf("%s thread holds the lock\n",lock->holder->name);
+  printf("%d threads waits for this lock\n",count_size(&lock->semaphore.waiters));
+  printf("@@@@@@@@@@@@@@@@\n");
+}
+
 /* Wake up the threads whose wakeup_ticks are less or equal to
    timer ticks */
 void thread_wakeup(int64_t w_ticks)

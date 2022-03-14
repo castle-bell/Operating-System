@@ -100,6 +100,7 @@ struct thread
     struct list donation;               /* List of donors. */
     struct lock *wait_on_lock;          /* lock that it waits for */
     struct list_elem donation_elem;            /* list element of donors */
+    struct list_elem w_elem;            /* list element for waiters list in semaphore */
 
 #ifdef USERPROG
     /* Owned by userprog/process.c. */
@@ -121,6 +122,7 @@ void thread_start (void);
 void thread_sleep(int64_t ticks);
 void thread_wakeup(int64_t ticks);
 void preemption(void);
+void print_thread(struct thread *t, struct lock *lock);    /* Print the elements of thread */
 
 void thread_tick (void);
 void thread_print_stats (void);
