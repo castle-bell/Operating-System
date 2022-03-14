@@ -82,7 +82,7 @@ void priority_donation(struct lock *cur_wait_lock,struct thread *cur)
   /* donation */
   lockhd->priority = cur->priority;
   priority_donation(lockhd->wait_on_lock, lockhd);
-  // list_insert_ordered(&lockhd->donation,&cur->donation_elem, cmp_d_priority, NULL);
+  list_insert_ordered(&lockhd->donation,&cur->donation_elem, cmp_d_priority, NULL);
 }
 
 
@@ -94,21 +94,24 @@ void priority_withdrawal(struct lock *lock_)
 
   struct thread *cur = thread_current();
   struct list_elem *e = list_begin(&cur->donation);
-  /* Case of not donated */
-  if(e == list_end(&cur->donation))
+  while(e != list_end(&cur->donation))
   {
-    cur->priority = cur->rep_priority;
-    return;
-  }
-  for(e;e!=list_end(&cur->donation);e=list_next(e))
-  {
-    if(list_entry(e,struct thread,donation_elem)->wait_on_lock == lock_)
+    if((list_entry(e,struct thread,donation_elem)->wait_on_lock) == lock_)
     {
       struct list_elem *prev = e->prev;
       list_remove(e);
       e = prev;
     }
+    e = list_next(e);
   }
+  e = list_begin(&cur->donation);
+  if(e == list_end(&cur->donation))
+  {
+    cur->priority = cur->rep_priority;
+    return;
+  }
+  else
+    cur->priority = list_entry(e,struct thread,donation_elem)->priority;
 }
 
 /* Initializes semaphore SEMA to VALUE.  A semaphore is a
@@ -282,13 +285,19 @@ lock_acquire (struct lock *lock)
   ASSERT (!intr_context ());
   ASSERT (!lock_held_by_current_thread (lock));
 
+  struct thread *cur = thread_current();
+  cur->wait_on_lock = lock;
+
   /* donate priority */
   if(lock->holder != NULL)
   {
-    struct thread *cur = thread_current();
-    cur->wait_on_lock = lock;
-    list_insert_ordered(&lock->holder->donation,&cur->donation_elem, cmp_d_priority, NULL);
+    /* Add */
+    enum intr_level old_level;
+    old_level = intr_disable();
     priority_donation(lock,cur);
+
+    /* Add */
+    intr_set_level(old_level);
   }
   sema_down (&lock->semaphore);
   lock->holder = thread_current ();
