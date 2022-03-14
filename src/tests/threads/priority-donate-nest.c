@@ -24,18 +24,6 @@ struct locks
 static thread_func medium_thread_func;
 static thread_func high_thread_func;
 
-static int count_size(struct list *lst)
-{
-  struct list_elem *e = list_begin(lst);
-  int i = 0;
-  for(e;e!=list_end(lst);e=list_next(e))
-  {
-    i++;
-  }
-  return i;
-}
-
-
 void
 test_priority_donate_nest (void) 
 {
@@ -59,12 +47,15 @@ test_priority_donate_nest (void)
   thread_yield ();
   msg ("Low thread should have priority %d.  Actual priority: %d.",
        PRI_DEFAULT + 1, thread_get_priority ());
+
   thread_create ("high", PRI_DEFAULT + 2, high_thread_func, &b);
   thread_yield ();
   msg ("Low thread should have priority %d.  Actual priority: %d.",
        PRI_DEFAULT + 2, thread_get_priority ());
+
   lock_release (&a);
   thread_yield ();
+  msg ("Medium thread should just have finished.");
   msg ("Low thread should have priority %d.  Actual priority: %d.",
        PRI_DEFAULT, thread_get_priority ());
 }
@@ -79,8 +70,12 @@ medium_thread_func (void *locks_)
 
   msg ("Medium thread should have priority %d.  Actual priority: %d.",
        PRI_DEFAULT + 2, thread_get_priority ());
+  msg ("Medium thread got the lock.");
+
   lock_release (locks->a);
   thread_yield ();
+
+  lock_release (locks->b);
   thread_yield ();
 
   msg ("High thread should have just finished.");
@@ -91,6 +86,7 @@ static void
 high_thread_func (void *lock_) 
 {
   struct lock *lock = lock_;
+
   lock_acquire (lock);
   msg ("High thread got the lock.");
   lock_release (lock);

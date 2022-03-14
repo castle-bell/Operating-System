@@ -1,5 +1,6 @@
 #include "list.h"
 #include "../debug.h"
+#include "../../threads/synch.h"
 
 /* Our doubly linked lists have two header elements: the "head"
    just before the first element and the "tail" just after the
@@ -54,6 +55,38 @@ static inline bool
 is_tail (struct list_elem *elem)
 {
   return elem != NULL && elem->prev != NULL && elem->next == NULL;
+}
+
+/* Various function of lock_list */
+
+/* Initializes Lock_List as an empty list. */
+void
+locks_init (struct lock_list *locks)
+{
+  ASSERT (locks != NULL);
+  locks->head = NULL;
+}
+
+/* Returns the beginning of locks.  */
+struct lock *
+locks_begin (struct lock_list *locks)
+{
+  ASSERT (locks != NULL);
+  return locks->head;
+}
+
+struct lock *
+locks_next (struct lock* lock)
+{
+  ASSERT (lock != NULL);
+  return lock->next;
+}
+
+bool
+is_lock_end (struct lock* lock)
+{
+  ASSERT (lock != NULL);
+  return lock->next == NULL;
 }
 
 /* Initializes LIST as an empty list. */

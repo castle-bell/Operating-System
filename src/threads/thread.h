@@ -101,6 +101,7 @@ struct thread
     struct lock *wait_on_lock;          /* lock that it waits for */
     struct list_elem donation_elem;            /* list element of donors */
     struct list_elem w_elem;            /* list element for waiters list in semaphore */
+    struct lock_list locks;             /* Store the locks that thread has */
 
 #ifdef USERPROG
     /* Owned by userprog/process.c. */

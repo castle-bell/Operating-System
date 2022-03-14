@@ -56,7 +56,7 @@ cmp_d_priority(const struct list_elem *a, const struct list_elem *b, void *aux U
   return (a_thread->rep_priority > b_thread->rep_priority) ? true : false;
 }
 
-static int count_size(struct list *lst)
+int count_size(struct list *lst)
 {
   struct list_elem *e = list_begin(lst);
   int i = 0;
@@ -69,20 +69,22 @@ static int count_size(struct list *lst)
 
 /* Donate the priority of cur to the lock holder if the priority of lock_ holder is
    less than the priority of cur */
-void priority_donation(struct lock *cur_wait_lock,struct thread *cur)
+int priority_donation(struct lock *cur_wait_lock UNUSED,struct thread *cur)
 {
-  if(cur_wait_lock == NULL)
-    return;
-  struct thread *lockhd = cur_wait_lock->holder;
-  /* May be if cur_wait_lock == NULL, then lockhd must be NULL. but just check */
-  if(lockhd == NULL)
-    return;
-  if(lockhd->priority >= cur->priority)
-    return;
-  /* donation */
-  lockhd->priority = cur->priority;
-  priority_donation(lockhd->wait_on_lock, lockhd);
-  list_insert_ordered(&lockhd->donation,&cur->donation_elem, cmp_d_priority, NULL);
+  for(int i =0; i<8; i++)
+  {
+    if(cur->wait_on_lock == NULL)
+      break;
+    struct thread * holder = cur->wait_on_lock->holder;
+    if(holder == NULL)
+      break;
+    if(cur->priority > holder->priority)
+    {
+      holder->priority = cur->priority;
+      // list_insert_ordered(&(holder->donation),&(cur->donation_elem),&cmp_d_priority,NULL);
+    }
+    cur = holder;
+  }
 }
 
 
@@ -93,25 +95,21 @@ void priority_withdrawal(struct lock *lock_)
   ASSERT(thread_current()->wait_on_lock == NULL);
 
   struct thread *cur = thread_current();
-  struct list_elem *e = list_begin(&cur->donation);
-  while(e != list_end(&cur->donation))
+  struct list_elem *donor_elem = list_begin(&cur->donation);
+  while(donor_elem != list_end(&cur->donation))
   {
-    if((list_entry(e,struct thread,donation_elem)->wait_on_lock) == lock_)
-    {
-      struct list_elem *prev = e->prev;
-      list_remove(e);
-      e = prev;
-    }
-    e = list_next(e);
+    struct thread *donor = list_entry(donor_elem,struct thread, donation_elem);
+    if(donor->wait_on_lock == lock_)
+      donor_elem = list_remove(donor_elem);
+    else
+      donor_elem = list_next(donor_elem);
   }
-  e = list_begin(&cur->donation);
-  if(e == list_end(&cur->donation))
+  if(!list_empty(&cur->donation))
   {
-    cur->priority = cur->rep_priority;
-    return;
+    cur->priority = list_entry(list_begin(&cur->donation),struct thread, donation_elem)->priority;
   }
   else
-    cur->priority = list_entry(e,struct thread,donation_elem)->priority;
+    cur->priority = cur->rep_priority;
 }
 
 /* Initializes semaphore SEMA to VALUE.  A semaphore is a
@@ -265,7 +263,8 @@ void
 lock_init (struct lock *lock)
 {
   ASSERT (lock != NULL);
-
+  lock->next = NULL;
+  lock->prev = NULL;
   lock->holder = NULL;
   sema_init (&lock->semaphore, 1);
 }
@@ -291,13 +290,8 @@ lock_acquire (struct lock *lock)
   /* donate priority */
   if(lock->holder != NULL)
   {
-    /* Add */
-    enum intr_level old_level;
-    old_level = intr_disable();
+    list_insert_ordered(&(lock->holder->donation),&(cur->donation_elem),&cmp_d_priority,NULL);
     priority_donation(lock,cur);
-
-    /* Add */
-    intr_set_level(old_level);
   }
   sema_down (&lock->semaphore);
   lock->holder = thread_current ();

@@ -100,6 +100,12 @@ struct list
     struct list_elem tail;      /* List tail. */
   };
 
+/* Lock_List. */
+struct lock_list 
+  {
+    struct lock *head;          /* Lock_List head. */
+  };
+
 /* Converts pointer to list element LIST_ELEM into a pointer to
    the structure that LIST_ELEM is embedded inside.  Supply the
    name of the outer structure STRUCT and the member name MEMBER
@@ -121,6 +127,14 @@ struct list
        struct list my_list = LIST_INITIALIZER (my_list); */
 #define LIST_INITIALIZER(NAME) { { NULL, &(NAME).tail }, \
                                  { &(NAME).head, NULL } }
+
+
+/* Lock list function */
+void locks_init (struct lock_list *locks);
+struct lock *locks_begin (struct lock_list *locks);
+struct lock *locks_next (struct lock* lock);
+bool is_lock_end (struct lock* lock);
+
 
 void list_init (struct list *);
 

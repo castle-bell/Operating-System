@@ -116,17 +116,6 @@ void preemption(void)
   }
 }
 
-static int count_size(struct list *lst)
-{
-  struct list_elem *e = list_begin(lst);
-  int i = 0;
-  for(e;e!=list_end(lst);e=list_next(e))
-  {
-    i++;
-  }
-  return i;
-}
-
 /* Print the thread elements */
 void print_thread(struct thread *t, struct lock *lock)
 {
@@ -474,9 +463,7 @@ thread_set_priority (int new_priority)
   struct thread *cur = thread_current ();
   cur->priority = new_priority;
 
-  /* Priority donation can occurs */
-  if(cur->wait_on_lock != NULL)
-    priority_donation(cur->wait_on_lock,cur);
+  /* Priority set highest priority in donation list */
 
   preemption();
   
@@ -612,6 +599,7 @@ init_thread (struct thread *t, const char *name, int priority)
   t->rep_priority = priority;
   list_init(&(t->donation));
   t->wait_on_lock = NULL;
+  locks_init(&(t->locks));
 
   old_level = intr_disable ();
   list_push_back (&all_list, &t->allelem);
