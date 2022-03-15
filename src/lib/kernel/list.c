@@ -57,7 +57,7 @@ is_tail (struct list_elem *elem)
   return elem != NULL && elem->prev != NULL && elem->next == NULL;
 }
 
-/* Various function of lock_list */
+/* Various function of lock_list(single linked list) */
 
 /* Initializes Lock_List as an empty list. */
 void
@@ -87,6 +87,55 @@ is_lock_end (struct lock* lock)
 {
   ASSERT (lock != NULL);
   return lock->next == NULL;
+}
+
+bool
+is_locks_empty (struct lock_list *locks)
+{
+  ASSERT (locks != NULL);
+  return locks->head == NULL;
+}
+
+void
+lock_push_front (struct lock_list *locks, struct lock* lock)
+{
+  ASSERT (lock != NULL);
+  ASSERT (locks != NULL);
+  if(is_locks_empty(locks))
+    locks->head = lock;
+  else
+  {
+    lock->next = locks->head;
+    locks->head = lock;
+  }
+}
+
+void
+lock_pop(struct lock_list *locks, struct lock* lock)
+{
+  ASSERT (lock != NULL);
+  ASSERT (locks != NULL);
+  ASSERT (!is_locks_empty(locks));
+  struct lock *prev = NULL;
+  struct lock *start = locks->head;
+  /* Find the location before lock in lock_list */
+  while(start != NULL)
+  {
+    if(start == lock)
+      break;
+    prev = start;
+    start = start->next;
+  }
+  if(prev == NULL) 
+  {
+    locks->head = start->next;
+    start->next = NULL;
+  }
+  else
+  {
+    prev->next = start->next;
+    start->next = NULL;
+  }
 }
 
 /* Initializes LIST as an empty list. */

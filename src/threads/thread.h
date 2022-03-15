@@ -97,9 +97,7 @@ struct thread
 
     /* Shared between thread.c and synch.c. */
     int rep_priority;                   /* store the origin priority */
-    struct list donation;               /* List of donors. */
     struct lock *wait_on_lock;          /* lock that it waits for */
-    struct list_elem donation_elem;            /* list element of donors */
     struct list_elem w_elem;            /* list element for waiters list in semaphore */
     struct lock_list locks;             /* Store the locks that thread has */
 

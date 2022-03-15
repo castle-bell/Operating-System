@@ -128,7 +128,6 @@ void print_thread(struct thread *t, struct lock *lock)
     t->wait_on_lock->holder);
   else
     printf("Thread doesn't wait the lock\n");
-  printf("Thread's donation list size is [%d]\n",count_size(&t->donation));
   if(lock->holder == NULL){
     printf("There is no lock holder\n");
   }
@@ -462,8 +461,11 @@ thread_set_priority (int new_priority)
 {
   struct thread *cur = thread_current ();
   cur->priority = new_priority;
+  cur->rep_priority = new_priority;
 
-  /* Priority set highest priority in donation list */
+  /* Priority set highest priority in lock list */
+  if(highest_priority_locklist() > cur->priority)
+    cur->priority = highest_priority_locklist();
 
   preemption();
   
@@ -597,7 +599,6 @@ init_thread (struct thread *t, const char *name, int priority)
   t->magic = THREAD_MAGIC;
   /* initialize the variables that use in priority donation */
   t->rep_priority = priority;
-  list_init(&(t->donation));
   t->wait_on_lock = NULL;
   locks_init(&(t->locks));
 
