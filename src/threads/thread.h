@@ -27,6 +27,9 @@ typedef int tid_t;
 /* global min_ticks */
 int64_t min_ticks;
 
+/* 17.14 fixed_point number 1 */
+#define F (1<<14)
+
 /* A kernel thread or user process.
 
    Each thread structure is stored in its own 4 kB page.  The
@@ -101,6 +104,13 @@ struct thread
     struct list_elem w_elem;            /* list element for waiters list in semaphore */
     struct lock_list locks;             /* Store the locks that thread has */
 
+    /* Advanced Scheduler(mlfqs) */
+    int nice;
+    int recent_cpu;
+
+    /* latency */
+    int64_t latency;
+
 #ifdef USERPROG
     /* Owned by userprog/process.c. */
     uint32_t *pagedir;                  /* Page directory. */
@@ -146,9 +156,46 @@ void thread_foreach (thread_action_func *, void *);
 int thread_get_priority (void);
 void thread_set_priority (int);
 
+bool is_idle(struct thread *t);
+
+/* Fixed point number arithmetic function */
+int int_to_fp(int n);
+int fp_to_int(int x);
+int fp_to_int_round(int x);
+int add_fp(int x, int y);
+int add_mixed(int x, int n);
+int sub_fp(int x, int y);
+int sub_mixed(int x, int n);
+int mult_fp(int x, int y);
+int mult_mixed(int x, int n);
+int div_fp(int x, int y);
+int div_mixed(int x, int n);
+
+
+/* Added function to calculate load_avg, recent_cpu, priority */
+void mlfqs_priority(struct thread *t);
+void mlfqs_recent_cpu (struct thread *t);
+void mlfqs_load_avg (void);
+void mlfqs_increment (void);
+void mlfqs_recalc (int load);
+
 int thread_get_nice (void);
 void thread_set_nice (int);
 int thread_get_recent_cpu (void);
 int thread_get_load_avg (void);
+
+/* Fixed_point number arithmetic function */
+int int_to_fp(int n);
+int fp_to_int_round(int x);
+int fp_to_int(int x);
+int add_fp(int x, int y);
+int add_mixed(int x, int n);
+int sub_fp(int x, int y);
+int sub_mixed(int x, int n);
+int mult_fp(int x, int y);
+int mult_mixed(int x, int n);
+int div_fp(int x, int y);
+int div_mixed(int x, int n);
+
 
 #endif /* threads/thread.h */

@@ -63,17 +63,6 @@ cmp_cond_priority(const struct list_elem *a, const struct list_elem *b, void *au
   return (a_thread->priority > b_thread->priority) ? true : false;
 }
 
-int count_size(struct list *lst)
-{
-  struct list_elem *e = list_begin(lst);
-  int i = 0;
-  for(e;e!=list_end(lst);e=list_next(e))
-  {
-    i++;
-  }
-  return i;
-}
-
 /* Donate the priority of cur to the lock holder if the priority of lock_ holder is
    less than the priority of cur
    Notice: there is no current thread in waiters */
@@ -123,7 +112,7 @@ int highest_priority_locklist(void)
 }
 
 
-void priority_withdrawal(struct lock *lock_)
+void priority_withdrawal(struct lock *lock_ UNUSED)
 {
   /* If there is a lock that the cur waits for, then it couldn't
      be executed */
@@ -313,7 +302,7 @@ lock_acquire (struct lock *lock)
   cur->wait_on_lock = lock;
 
   /* donate priority */
-  if(lock->holder != NULL)
+  if(lock->holder != NULL && !thread_mlfqs)
   {
     priority_donation(lock,cur);
   }
@@ -354,7 +343,8 @@ lock_release (struct lock *lock)
   ASSERT (lock != NULL);
   ASSERT (lock_held_by_current_thread (lock));
   lock_pop(&thread_current()->locks,lock);
-  priority_withdrawal(lock);
+  if(!thread_mlfqs)
+    priority_withdrawal(lock);
   lock->holder = NULL;
   sema_up (&lock->semaphore);
 }

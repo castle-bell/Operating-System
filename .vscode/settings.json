@@ -5,6 +5,15 @@
         "fstream": "c",
         "istream": "c",
         "cmath": "c",
-        "tuple": "c"
+        "tuple": "c",
+        "in.h": "c",
+        "inet.h": "c",
+        "stdlib.h": "c",
+        "unistd.h": "c",
+        "system_error": "c",
+        "stdbool.h": "c",
+        "socket.h": "c",
+        "ctype.h": "c",
+        "netdb.h": "c"
     }
 }

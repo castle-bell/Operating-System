@@ -172,9 +172,38 @@ static void
 timer_interrupt (struct intr_frame *args UNUSED)
 {
   ticks++;
-  thread_tick ();
+  if(thread_report_latency)
+  {
+    if(!is_idle(thread_current()))
+    {
+      struct thread* cur = thread_current();
+      int64_t t = timer_ticks();
+      if(t<cur->latency)
+      {
+        cur->latency = t; 
+      }
+    }
+  }
+  if(thread_mlfqs)
+  {
+    /* The order of if is important because the case of
+    timer_ticks() % TIMER_FREQ == 0 && % 4 == 0 */
+    /* In every second, recalculate load_avg, recent_cpu, priority */
+    mlfqs_increment();
+    if(timer_ticks() % TIMER_FREQ == 0)
+    {
+      mlfqs_load_avg();
+      mlfqs_recalc(1);
+    }
+    /* In every 4th tick, recalculate priority of all threads */
+    if(timer_ticks() % 4 == 0)
+    {
+      mlfqs_recalc(0);
+    }
+  }
   if(min_ticks<=ticks)
     thread_wakeup(ticks);
+  thread_tick ();
 }
 
 /* Returns true if LOOPS iterations waits for more than one timer
