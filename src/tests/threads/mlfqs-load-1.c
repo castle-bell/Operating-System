@@ -22,7 +22,6 @@ test_mlfqs_load_1 (void)
   int load_avg;
   
   ASSERT (thread_mlfqs);
-
   msg ("spinning for up to 45 seconds, please wait...");
 
   start_time = timer_ticks ();

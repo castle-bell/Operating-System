@@ -98,6 +98,8 @@ struct list
   {
     struct list_elem head;      /* List head. */
     struct list_elem tail;      /* List tail. */
+    struct list *prev;          /* For multi ready queue */
+    struct list *next;          /* For multi ready queue */
   };
 
 /* Lock_List. */
@@ -105,6 +107,16 @@ struct lock_list
   {
     struct lock *head;          /* Lock_List head. */
   };
+
+
+/* Multi_ready_queue */
+struct multi_ready
+  {
+    struct list head;
+    struct list tail;
+  };
+
+void multi_push_front(struct multi_ready *ready, struct list *list);
 
 /* Converts pointer to list element LIST_ELEM into a pointer to
    the structure that LIST_ELEM is embedded inside.  Supply the
@@ -139,6 +151,10 @@ void lock_push_front (struct lock_list *locks, struct lock* lock);
 void lock_pop(struct lock_list *locks, struct lock* lock);
 
 void list_init (struct list *);
+
+/* For multi ready queue */
+struct list* find_ready_prior(struct multi_ready *multi_ready, int priority);
+struct list* find_ready_max(struct multi_ready *multi_ready);
 
 /* List traversal. */
 struct list_elem *list_begin (struct list *);

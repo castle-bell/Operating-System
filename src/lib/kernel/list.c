@@ -138,6 +138,47 @@ lock_pop(struct lock_list *locks, struct lock* lock)
   }
 }
 
+void multi_push_front(struct multi_ready *ready, struct list *list)
+{
+  struct list *begin = &ready->head;
+  begin->next->prev = list;
+  list->next = begin->next;
+  list->prev = begin;
+  begin->next = list;
+}
+
+/* Return the ready_list pointer which impies the priority= PRIORITY */
+struct list*
+find_ready_prior(struct multi_ready *multi, int priority)
+{
+  ASSERT(priority >=0 || priority <=63);
+  int order = 64 - priority;
+  struct list* tail = &multi->tail;
+  for(int i = 0; i<order; i++)
+  {
+    tail = tail->prev;
+  }
+  return tail;
+}
+
+/* Return the ready_list pointer which have elem whose priority is max,
+    if there is no elem, return NULL */
+struct list*
+find_ready_max(struct multi_ready *multi)
+{
+  struct list* ready_list = multi->tail.prev;
+  while(ready_list != &(multi->head))
+  {
+    if(!list_empty(ready_list))
+      break;
+  }
+  /* There is no elem */
+  if(ready_list == &(multi->head))
+    return NULL;
+  else
+    return ready_list;
+}
+
 /* Initializes LIST as an empty list. */
 void
 list_init (struct list *list)
@@ -147,6 +188,8 @@ list_init (struct list *list)
   list->head.next = &list->tail;
   list->tail.prev = &list->head;
   list->tail.next = NULL;
+  list->prev = NULL;
+  list->next = NULL;
 }
 
 /* Returns the beginning of LIST.  */

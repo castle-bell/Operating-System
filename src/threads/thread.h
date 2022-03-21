@@ -169,6 +169,8 @@ int mult_mixed(int x, int n);
 int div_fp(int x, int y);
 int div_mixed(int x, int n);
 
+/* Initialize multi thread queue */
+void init_multi(struct multi_ready *multi);
 
 /* Added function to calculate load_avg, recent_cpu, priority */
 void mlfqs_priority(struct thread *t);
@@ -176,6 +178,7 @@ void mlfqs_recent_cpu (struct thread *t);
 void mlfqs_load_avg (void);
 void mlfqs_increment (void);
 void mlfqs_recalc (int load);
+void mlfqs_prior_reset(struct multi_ready* multi_list);
 
 int thread_get_nice (void);
 void thread_set_nice (int);

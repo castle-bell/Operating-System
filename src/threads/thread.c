@@ -12,6 +12,7 @@
 #include "threads/synch.h"
 #include "threads/vaddr.h"
 #include "../devices/timer.h"
+#include "threads/malloc.h"
 #ifdef USERPROG
 #include "userprog/process.h"
 #endif
@@ -31,6 +32,9 @@ int load_avg;
 /* List of processes in THREAD_READY state, that is, processes
    that are ready to run but not actually running. */
 static struct list ready_list;
+
+/* List of ready queues for multi ready queues on MLFQS option */
+static struct multi_ready multi_ready;
 
 /* List of all processes.  Processes are added to this list
    when they are first scheduled and removed when they exit. */
@@ -116,12 +120,25 @@ cmp_priority(const struct list_elem *a, const struct list_elem *b, void *aux UNU
    the priority of running thread */
 void preemption(void)
 {
-  if(!list_empty(&ready_list))
+  if(!thread_mlfqs)
   {
-    list_sort(&ready_list, cmp_priority, NULL);
-    struct thread *cmp = list_entry(list_begin(&ready_list),struct thread, elem);
-    if(thread_current()->priority < cmp->priority)
-      thread_yield();
+    if(!list_empty(&ready_list))
+    {
+      list_sort(&ready_list, cmp_priority, NULL);
+      struct thread *cmp = list_entry(list_begin(&ready_list),struct thread, elem);
+      if(thread_current()->priority < cmp->priority)
+        thread_yield();
+    }
+  }
+  else
+  {
+    struct list* ready;
+    if((ready = find_ready_max(&multi_ready)) != NULL)
+    {
+      struct thread *cmp = list_entry(list_begin(ready),struct thread, elem);
+      if(thread_current()->priority < cmp->priority)
+        thread_yield();
+    }
   }
 }
 
@@ -217,6 +234,20 @@ int div_mixed(int x, int n)
   return x/n;
 }
 
+/* initialize multi_ready_queue */
+void init_multi(struct multi_ready *multi)
+{
+  ASSERT(multi != NULL);
+  list_init(&multi->head);
+  list_init(&multi->tail);
+  for(int i = PRI_MIN; i < PRI_MAX+1; i++)
+  {
+    struct list ready_list;
+    list_init(&ready_list);
+    multi_push_front(multi,&ready_list);
+  }
+}
+
 
 /* Initializes the threading system by transforming the code
    that's currently running into a thread.  This can't work in
@@ -235,12 +266,14 @@ void
 thread_init (void) 
 {
   ASSERT (intr_get_level () == INTR_OFF);
-
+  
   lock_init (&tid_lock);
-  list_init (&ready_list);
+  if(thread_mlfqs)
+    init_multi(&multi_ready);
+  else
+    list_init (&ready_list);
   list_init (&all_list);
   list_init (&sleep_list);
-
   /* Set up a thread structure for the running thread. */
   initial_thread = running_thread ();
   init_thread (initial_thread, "main", PRI_DEFAULT);
@@ -406,12 +439,14 @@ void
 thread_unblock (struct thread *t) 
 {
   enum intr_level old_level;
-
   ASSERT (is_thread (t));
 
   old_level = intr_disable ();
   ASSERT (t->status == THREAD_BLOCKED);
-  list_insert_ordered(&ready_list, &t->elem, &cmp_priority, NULL);
+  if(!thread_mlfqs)
+    list_insert_ordered(&ready_list, &t->elem, &cmp_priority, NULL);
+  else
+    list_push_front(find_ready_prior(&multi_ready,t->priority), &t->elem);
   t->status = THREAD_READY;
   /* For latency measurement */
   if(thread_report_latency)
@@ -480,6 +515,14 @@ thread_exit (void)
     struct thread* cur = thread_current();
     printf("Thread <%s> completed in <%lld> ticks\n",cur->name,timer_ticks()-cur->latency);
   }
+  if(thread_mlfqs)
+  {
+    struct list *begin = (&multi_ready)->head.next;
+    while(begin != &((&multi_ready)->tail))
+    {
+      free(begin);
+    }
+  }
   thread_current ()->status = THREAD_DYING;
 
   schedule ();
@@ -498,7 +541,12 @@ thread_yield (void)
 
   old_level = intr_disable ();
   if (cur != idle_thread) 
-    list_insert_ordered(&ready_list, &cur->elem, &cmp_priority, NULL);
+  {
+    if(!thread_mlfqs)
+      list_insert_ordered(&ready_list, &cur->elem, &cmp_priority, NULL);
+    else
+      list_push_front(find_ready_prior(&multi_ready,cur->priority), &cur->elem);
+  }
   cur->status = THREAD_READY;
   schedule ();
   intr_set_level (old_level);
@@ -573,6 +621,28 @@ void mlfqs_priority(struct thread *t)
   }
 }
 
+void mlfqs_prior_reset(struct multi_ready* multi_list)
+{
+  struct list* ready;
+  for(int i = 0; i < 64; i++)
+  {
+    ready = find_ready_prior(multi_list,i);
+    struct list_elem* ready_order = list_begin(ready);
+    while(ready_order != list_end(ready))
+    {
+      struct thread* t = list_entry(ready_order,struct thread, elem);
+      if(t->priority != i)
+      {
+        struct list_elem* backup = ready_order;
+        ready_order = list_remove(ready_order);
+        list_push_back(find_ready_prior(multi_list,t->priority),backup);
+      }
+      else
+        ready_order = list_next(ready_order);
+    }
+  }
+}
+
 void mlfqs_recent_cpu (struct thread *t)
 {
   ASSERT(thread_mlfqs);
@@ -586,7 +656,11 @@ void mlfqs_recent_cpu (struct thread *t)
 void mlfqs_load_avg (void)
 {
   ASSERT(thread_mlfqs);
-  int num_ready = list_size(&ready_list);
+  int num_ready = 0;
+  for(int i = 0; i<64; i++)
+  {
+    num_ready += list_size(find_ready_prior(&multi_ready,i));
+  }
   if(thread_current() != idle_thread)
     num_ready = num_ready + 1;
   int coef1 = div_fp(int_to_fp(59),int_to_fp(60));
@@ -620,8 +694,8 @@ void mlfqs_recalc (int set)
     if(set == 0)
       mlfqs_priority(t);
   }
-  if(set == 0)
-    list_sort(&ready_list,cmp_priority,NULL);
+  /* reordering the multi ready queue */
+  mlfqs_prior_reset(&multi_ready);
 }
 
 /* Sets the current thread's nice value to NICE. */
@@ -800,10 +874,25 @@ alloc_frame (struct thread *t, size_t size)
 static struct thread *
 next_thread_to_run (void) 
 {
-  if (list_empty (&ready_list))
-    return idle_thread;
+  if(!thread_mlfqs)
+  {
+    if (list_empty (&ready_list))
+      return idle_thread;
+    else
+      return list_entry (list_pop_front (&ready_list), struct thread, elem);
+  }
   else
-    return list_entry (list_pop_front (&ready_list), struct thread, elem);
+  {
+    int num_ready = 0;
+    for(int i = 0; i<64; i++)
+    {
+      num_ready += list_size(find_ready_prior(&multi_ready,i));
+    }
+    if(num_ready == 0)
+      return idle_thread;
+    else
+      return list_entry(list_pop_front(find_ready_max(&multi_ready)),struct thread, elem);
+  }
 }
 
 /* Completes a thread switch by activating the new thread's page
