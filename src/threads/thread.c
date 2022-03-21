@@ -11,6 +11,7 @@
 #include "threads/switch.h"
 #include "threads/synch.h"
 #include "threads/vaddr.h"
+#include "../devices/timer.h"
 #ifdef USERPROG
 #include "userprog/process.h"
 #endif
@@ -82,12 +83,6 @@ static void *alloc_frame (struct thread *, size_t size);
 static void schedule (void);
 void thread_schedule_tail (struct thread *prev);
 static tid_t allocate_tid (void);
-
-bool is_idle(struct thread *t)
-{
-  return (t == idle_thread);
-}
-
 
 /* Compares the value of wakeup ticks of threads which contains two list 
    elements A and B each, given auxiliary data AUX.  Returns true if A is
@@ -418,6 +413,15 @@ thread_unblock (struct thread *t)
   ASSERT (t->status == THREAD_BLOCKED);
   list_insert_ordered(&ready_list, &t->elem, &cmp_priority, NULL);
   t->status = THREAD_READY;
+  /* For latency measurement */
+  if(thread_report_latency)
+  {
+    int64_t time = timer_ticks();
+    if(time < t->latency)
+    {
+      t->latency = time;
+    }
+  }
   intr_set_level (old_level);
 }
 
@@ -470,7 +474,14 @@ thread_exit (void)
      when it calls thread_schedule_tail(). */
   intr_disable ();
   list_remove (&thread_current()->allelem);
+  /* For latency measurement */
+  if(thread_report_latency)
+  {
+    struct thread* cur = thread_current();
+    printf("Thread <%s> completed in <%lld> ticks\n",cur->name,timer_ticks()-cur->latency);
+  }
   thread_current ()->status = THREAD_DYING;
+
   schedule ();
   NOT_REACHED ();
 }
@@ -837,8 +848,6 @@ thread_schedule_tail (struct thread *prev)
   if (prev != NULL && prev->status == THREAD_DYING && prev != initial_thread) 
     {
       ASSERT (prev != cur);
-      printf("1\n");
-      printf("Thread <%s> completed in <%ld> ticks\n",prev->name,timer_ticks()-prev->latency);
       palloc_free_page (prev);
     }
 }

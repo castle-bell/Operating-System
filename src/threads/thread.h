@@ -156,8 +156,6 @@ void thread_foreach (thread_action_func *, void *);
 int thread_get_priority (void);
 void thread_set_priority (int);
 
-bool is_idle(struct thread *t);
-
 /* Fixed point number arithmetic function */
 int int_to_fp(int n);
 int fp_to_int(int x);

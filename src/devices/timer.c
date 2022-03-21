@@ -172,18 +172,6 @@ static void
 timer_interrupt (struct intr_frame *args UNUSED)
 {
   ticks++;
-  if(thread_report_latency)
-  {
-    if(!is_idle(thread_current()))
-    {
-      struct thread* cur = thread_current();
-      int64_t t = timer_ticks();
-      if(t<cur->latency)
-      {
-        cur->latency = t; 
-      }
-    }
-  }
   if(thread_mlfqs)
   {
     /* The order of if is important because the case of
