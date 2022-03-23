@@ -526,6 +526,9 @@ thread_foreach (thread_action_func *func, void *aux)
 void
 thread_set_priority (int new_priority) 
 {
+  enum intr_level old_level;
+  old_level = intr_disable ();
+
   /* Advanced Scheduler */
   if(thread_mlfqs == true)
   {
@@ -542,7 +545,10 @@ thread_set_priority (int new_priority)
 
   preemption();
   
+  intr_set_level (old_level);
+  
   list_sort(&ready_list,&cmp_priority,NULL);
+
 }
 
 /* Returns the current thread's priority. */
@@ -556,6 +562,9 @@ thread_get_priority (void)
 void mlfqs_priority(struct thread *t)
 {
   ASSERT(thread_mlfqs);
+  enum intr_level old_level;
+  old_level = intr_disable ();
+  
   /* Check the thread is idle thread */
   int priority;
   int cpu_comp = div_mixed(t->recent_cpu,4);
@@ -571,6 +580,7 @@ void mlfqs_priority(struct thread *t)
       priority = PRI_MIN;
     t->priority = priority;
   }
+  intr_set_level (old_level);
 }
 
 void mlfqs_recent_cpu (struct thread *t)

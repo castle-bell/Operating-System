@@ -113,6 +113,30 @@ struct thread
 >> Use ASCII art to diagram a nested donation.  (Alternately, submit a
 >> .png file.)
 
+nested donation case를 다루기 위해 thread가 기다리는 lock을 struct lock* wait_on_lock 저장하도록 하였다. Thread A가 Lock A를 기다리는 상황이고 괄호 안은 thread의 priority를 표현한다.
+
+  
+  Thread C(26)->(28)->(31)
+            /\
+            |
+            |
+        LOCK B(Holder: thread C)
+            /\
+            |
+            |
+    Thread B(28)->(31)  wait_on_lock = LOCKB
+            /\
+            |
+            |
+         LOCK A(Holder: thread B)                
+            /\
+            |
+            |
+      Thread A(31) wait_on_lock = LOCKA
+
+기다리는 LOCK을 저장해 두면 wait_on_lock -> holder를 통해 thread A는 thread B의 정보를 얻을 수 있고 이를 통해 donation을 진행하고 재귀적으로 thread B는 wait_on_lock(LOCKB)->holder를 통해 thread C에 priority donation할 수 있다.
+
+
 ---- ALGORITHMS ----
 
 >> B3: How do you ensure that the highest priority thread waiting for
