@@ -98,6 +98,7 @@ thread_init (void)
   init_thread (initial_thread, "main", PRI_DEFAULT);
   initial_thread->status = THREAD_RUNNING;
   initial_thread->tid = allocate_tid ();
+  initial_thread->parent = NULL;
 }
 
 /* Starts preemptive thread scheduling by enabling interrupts.
@@ -197,6 +198,12 @@ thread_create (const char *name, int priority,
   sf = alloc_frame (t, sizeof *sf);
   sf->eip = switch_entry;
   sf->ebp = 0;
+
+  /* Process hierarchy */
+  t->parent = thread_current();
+  list_push_back(&(thread_current()->sibling), &(t->s_elem));
+
+  /* Set sema down if parents wait */
 
   /* Add to run queue. */
   thread_unblock (t);
@@ -467,6 +474,24 @@ init_thread (struct thread *t, const char *name, int priority)
   old_level = intr_disable ();
   list_push_back (&all_list, &t->allelem);
   intr_set_level (old_level);
+
+#ifdef USERPROG
+  /* Process hierarchy */
+  list_init(&t->sibling);
+
+  /* Semaphore init for wait child process */
+  t->is_parent_wait = false;
+  sema_init(&(t->sema),0);
+
+  /* FDT setting */
+  for(int i = 0;i<64;i++)
+  {
+    t->fdt[i] = NULL;
+  }
+
+  /* Killed */
+  t->child_normal_exit = false;
+#endif
 }
 
 /* Allocates a SIZE-byte frame at the top of thread T's stack and

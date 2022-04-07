@@ -17,9 +17,84 @@
 #include "threads/palloc.h"
 #include "threads/thread.h"
 #include "threads/vaddr.h"
+#include "threads/synch.h"
 
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
+
+void argument_parsing(char *argument[], int* count, char* file_name)
+{
+  int i = 0;
+  char *save_ptr;
+  char *ptr = strtok_r(file_name," ",&save_ptr);
+  while(1)
+  {
+    if((ptr == NULL) || i >= 64)
+      break;
+    argument[i] = ptr;
+    i++;
+    ptr = strtok_r(NULL," ",&save_ptr);
+  }
+  argument[i] = NULL;
+  *count = i;
+}
+
+void argument_stack(char **argument, int count, void **esp)
+{
+  ASSERT(argument[count] == NULL);
+  int i;
+  int j;
+  int len = 0;
+  int padding = 0;
+
+  /* First push the all argument including \0 */
+  for(i=count-1; i>=0; i--)
+  {
+    len = strlen(argument[i]);
+    for(j=len; j>=0; j--)
+    {
+      *esp = *esp - 1; /* To store char */
+      **(char**)esp = argument[i][j];
+      padding += 1;
+    }
+    argument[i] = *esp;
+  } 
+  /* Add padding */
+  if((padding % 4) == 0)
+    padding = 0;
+  else
+    padding = 4 - (padding % 4);
+  
+  for(i=0; i<padding; i++)
+  {
+    *esp = *esp - 1; /* To store char */
+    **((uint8_t**)esp) = (uint8_t)0;
+  }
+
+  /* Push argument's address, pintos is 80x86 architecture,
+    size of pointer is 4bytes. */
+  
+  for(i=count; i>=0; i--)
+  {
+    *esp = *esp - 4; /* To store char* */
+    *(char**)*esp = argument[i];
+  }
+  argument = *esp;
+
+  /* Push argument pointer */
+  *esp = *esp - 4;
+  **(uint32_t **)esp = (uint32_t)argument;
+
+  /* Push # of argument */
+  *esp = *esp - 4;
+  **((int**)esp) = count;
+
+  /* Push false address */
+  *esp = *esp - 4;
+  **((int **)esp) = (uint32_t)(void *)0;
+}
+
+
 
 /* Starts a new thread running a user program loaded from
    FILENAME.  The new thread may be scheduled (and may even exit)
@@ -31,15 +106,25 @@ process_execute (const char *file_name)
   char *fn_copy;
   tid_t tid;
 
+  char copy[256]; // why 4KB?
+  char *token;
+  char *save_ptr;
+
   /* Make a copy of FILE_NAME.
      Otherwise there's a race between the caller and load(). */
   fn_copy = palloc_get_page (0);
   if (fn_copy == NULL)
     return TID_ERROR;
   strlcpy (fn_copy, file_name, PGSIZE);
+  strlcpy (copy, file_name, PGSIZE);
+
+  /* Parsing the file_name */
+  token = strtok_r(copy," ",&save_ptr);
+  if(token == NULL)
+    token = copy;
 
   /* Create a new thread to execute FILE_NAME. */
-  tid = thread_create (file_name, PRI_DEFAULT, start_process, fn_copy);
+  tid = thread_create (token, PRI_DEFAULT, start_process, fn_copy);
   if (tid == TID_ERROR)
     palloc_free_page (fn_copy); 
   return tid;
@@ -54,12 +139,22 @@ start_process (void *file_name_)
   struct intr_frame if_;
   bool success;
 
+  /* Parsing the file_name */
+  char *argument[64];
+  int count;
+  argument_parsing(&argument,&count,file_name);
+  file_name = argument[0];
+  
   /* Initialize interrupt frame and load executable. */
   memset (&if_, 0, sizeof if_);
   if_.gs = if_.fs = if_.es = if_.ds = if_.ss = SEL_UDSEG;
   if_.cs = SEL_UCSEG;
   if_.eflags = FLAG_IF | FLAG_MBS;
   success = load (file_name, &if_.eip, &if_.esp);
+
+  /* Push the arguments to user stack */
+  if(success)
+    argument_stack(argument,count,&if_.esp);
 
   /* If load failed, quit. */
   palloc_free_page (file_name);
@@ -86,9 +181,38 @@ start_process (void *file_name_)
    This function will be implemented in problem 2-2.  For now, it
    does nothing. */
 int
-process_wait (tid_t child_tid UNUSED) 
+process_wait (tid_t child_tid) 
 {
-  return -1;
+  /* Search the descriptor of the child process */
+  struct thread *cur = thread_current();
+  struct thread *child;
+  struct list_elem *ptr = list_begin(&cur->sibling);
+
+  for(ptr; ptr!=list_end(&cur->sibling); ptr=list_next(ptr))
+  {
+    child = list_entry(ptr,struct thread,s_elem);
+    if(child_tid == child->tid)
+      break;
+  }
+  
+  /* Error case(no child), return -1 for failure */
+  if(ptr == list_end(&cur->sibling))
+    return -1;
+  /* Already wait for this child */
+  if((child->is_parent_wait) == true)
+    return -1;
+  /* Wait until the child process terminates using sema_down */
+  /* Set the child process' bool is parent wait true */
+  child->is_parent_wait = true;
+  sema_down(&(child->sema));
+
+  /* If killed, return -1 */
+  if(!cur->child_normal_exit)
+  {
+    return -1;
+  }
+
+  return cur->wait_exit_status;
 }
 
 /* Free the current process's resources. */
