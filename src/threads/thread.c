@@ -483,6 +483,10 @@ init_thread (struct thread *t, const char *name, int priority)
   t->is_parent_wait = false;
   sema_init(&(t->sema),0);
 
+  /* Semaphore init for exec syscall */
+  t->child_success_load = false;
+  sema_init(&(t->exec_sema),0);
+
   /* FDT setting */
   for(int i = 0;i<64;i++)
   {
@@ -491,6 +495,10 @@ init_thread (struct thread *t, const char *name, int priority)
 
   /* Killed */
   t->child_normal_exit = false;
+
+  /* Store running file */
+  t->file_run = NULL;
+
 #endif
 }
 

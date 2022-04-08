@@ -22,6 +22,7 @@ test_main (void)
   CHECK (create (file_name, sizeof buf1), "create \"%s\"", file_name);
 
   exec_children ("child-syn-wrt", children, CHILD_CNT);
+  printf("??????\n");
   wait_children (children, CHILD_CNT);
 
   CHECK ((fd = open (file_name)) > 1, "open \"%s\"", file_name);

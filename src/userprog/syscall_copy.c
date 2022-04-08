@@ -94,17 +94,13 @@ void sys_exit(int status)
 
 pid_t sys_exec(const char *cmd_line)
 {
-  lock_acquire(&filesys_lock);
   if(!check_arg_validity((void *)cmd_line,4000))
   {
-    lock_release(&filesys_lock);
     sys_exit(-1);
   }
 
   tid_t result;
   result = process_execute(cmd_line);
-
-  lock_release(&filesys_lock);
   return (pid_t)result;
 }
 
@@ -115,43 +111,32 @@ int sys_wait(pid_t pid)
 
 bool sys_create(const char *file, unsigned initial_size)
 {
-  lock_acquire(&filesys_lock);
   if(!check_arg_validity((void *)file,20))
   {
-    lock_release(&filesys_lock);
     sys_exit(-1);
   }
 
   /* If file_name = [], then exit */
   if(strlen(file) == 0)
-  {
-    lock_release(&filesys_lock);
     return false;
-  }
 
-  lock_release(&filesys_lock);
   return filesys_create(file,initial_size);
 }
 
 bool sys_remove(const char *file)
 {
-  lock_acquire(&filesys_lock);
   if(!check_arg_validity((void *)file,20))
   {
-    lock_release(&filesys_lock);
     sys_exit(-1);
   }
 
-  lock_release(&filesys_lock);
   return filesys_remove(file);
 }
 
 int sys_open(const char *file)
 {
-  lock_acquire(&filesys_lock);
   if(!check_arg_validity((void *)file,20))
   {
-    lock_release(&filesys_lock);
     sys_exit(-1);
   }
 
@@ -162,10 +147,7 @@ int sys_open(const char *file)
   open_file =  filesys_open(file);
   /* File open failed */
   if(open_file == NULL)
-  {
-    lock_release(&filesys_lock);
     return -1;
-  }
 
   /* PDE 구현 후 해당 파일 찾아서 descriptor 반환 */
   for(fd = 3; fd<128; fd++)
@@ -174,42 +156,34 @@ int sys_open(const char *file)
       break;
   }
   cur->fdt[fd] = open_file;
-  lock_release(&filesys_lock);
   return fd;
 }
 
 int sys_filesize(int fd)
 {
-  lock_acquire(&filesys_lock);
   struct file* file;
   struct thread* cur = thread_current();
 
   /* Check range of fd */
-  if(fd < 0 || fd > 127 || (file = cur->fdt[fd]) == NULL)
-  {
-    lock_release(&filesys_lock);
+  if(fd < 0 || fd > 127)
     return -1;
-  }
 
-  lock_release(&filesys_lock);
+  if((file = cur->fdt[fd]) == NULL)
+    return -1;
+  
   return file_length(file);
 }
 
 int sys_read(int fd, void *buffer, unsigned size)
 {
-  lock_acquire(&filesys_lock);
   if(!check_arg_validity(buffer, size+2))
   {
-    lock_release(&filesys_lock);
     sys_exit(-1);
   }
 
   /* Check range of fd */
   if(fd < 0 || fd > 127)
-  {
-    lock_release(&filesys_lock);
     return -1;
-  }
 
   struct file* file;
   struct thread* cur = thread_current();
@@ -218,45 +192,38 @@ int sys_read(int fd, void *buffer, unsigned size)
   /* Read from stdin */
   if(fd == 0)
   {
-    lock_release(&filesys_lock);
     return input_getc();
   }
 
   if(fd == 1 || fd == 2)
-  {
-    lock_release(&filesys_lock);
     return -1;
-  }
 
   else
   {
     if((file = cur->fdt[fd]) == NULL)
-    {
-      lock_release(&filesys_lock);
       return -1;
-    }
     length = file_read(file,buffer,size);
 
   }
-  lock_release(&filesys_lock);
   return length;
 }
 
 int sys_write(int fd, const void *buffer, unsigned size)
 {
-  lock_acquire(&filesys_lock);
   if(!check_arg_validity(buffer, size+2))
   {
-    lock_release(&filesys_lock);
     sys_exit(-1);
+  }
+
+  char *buff = (char *)buffer;
+  for(int j = 0;j<size; j++)
+  {
+    printf("buffer[%d]: %c\n",j,buff[j]);
   }
 
   /* Check range of fd */
   if(fd < 0 || fd > 127)
-  {
-    lock_release(&filesys_lock);
     return -1;
-  }
   char buf = ((char*)buffer)[0];
   /* Check the buffer's element is not on the kernel space */
 
@@ -268,77 +235,63 @@ int sys_write(int fd, const void *buffer, unsigned size)
   if(fd == 1)
   {
     putbuf(buffer,size);
-    lock_release(&filesys_lock);
+    printf("2\n");
     return size;
   }
 
   if(fd == 0 || fd == 2)
-  {
-    lock_release(&filesys_lock);
     return -1;
-  }
 
   else
   {
     file = cur->fdt[fd];
     if(file == NULL)
-    {
-      lock_release(&filesys_lock);
       return -1;
-    }
     length = file_write(file,buffer,size);
   }
-  lock_release(&filesys_lock);
   return length;
 }
 
 void sys_seek(int fd, unsigned position)
 {
-  lock_acquire(&filesys_lock);
   struct file* file;
   struct thread* cur = thread_current();
 
   /* Check range of fd */
   if(fd < 0 || fd > 127)
-  {
-    lock_release(&filesys_lock);
     return;
-  }
 
   if((file = cur->fdt[fd]) != NULL)
     file_seek(file,position);
-  lock_release(&filesys_lock);
 }
 
 unsigned sys_tell(int fd)
 {
-  lock_acquire(&filesys_lock);
   struct file* file;
   struct thread* cur = thread_current();
 
   /* Check range of fd */
-  if(fd < 0 || fd > 127 || (file = cur->fdt[fd]) == NULL)
-  {
-    lock_release(&filesys_lock);
+  if(fd < 0 || fd > 127)
     return -1;
-  }
 
-  lock_release(&filesys_lock);
+  if((file = cur->fdt[fd]) == NULL)
+    return -1;
+  
   return file_tell(file);
 }
 
 void sys_close(int fd)
 {
-  lock_acquire(&filesys_lock);
   struct file* file;
   struct thread* cur = thread_current();
 
-  /* check fd */
-  if(fd == 0 || fd == 1 || fd ==2 || fd < 0 || fd > 127)
-  {
-    lock_release(&filesys_lock);
+  /* Only operate when fd != 0,1,2 */
+  if(fd == 0 || fd == 1 || fd ==2)
     return;
-  }
+
+  /* Check the value of fd */
+  if(fd < 0 || fd > 127)
+    return;
 
   file = cur->fdt[fd];
   if(file != NULL)
@@ -347,7 +300,6 @@ void sys_close(int fd)
     file_close(file);
     file = cur->fdt[fd] = NULL;
   }
-  lock_release(&filesys_lock);
 }
 
 void sys_sigaction(int signum, void (*handler) (void))
@@ -367,7 +319,7 @@ void sched_yield()
 
 /* Check the stack is enougth to store in user address, and
    get argument using esp and store */
-void get_argument(void *esp, int* argument, int count)
+void get_argument(void *esp, uint32_t* argument, int count)
 {
   struct thread *cur = thread_current();
 
@@ -377,7 +329,7 @@ void get_argument(void *esp, int* argument, int count)
   {
     if(!check_esp_validity(esp))
       sys_exit(-1);
-    argument[i] = *(int*)esp;
+    argument[i] = *(uint32_t*)esp;
     esp = esp + 4;
   }
 }
@@ -386,7 +338,6 @@ void
 syscall_init (void) 
 {
   intr_register_int (0x30, 3, INTR_ON, syscall_handler, "syscall");
-  lock_init(&filesys_lock);
 }
 
 static void
@@ -396,12 +347,13 @@ syscall_handler (struct intr_frame *f)
   void *esp = f->esp;
   if(!check_esp_validity(esp))
     sys_exit(-1);
+
   /* Get the number of arguments */
   int argument_number;
-  int argument[64];
-  argument_number = *(int*)esp;
+  uint32_t argument[64];
+  argument_number = *(uint32_t*)esp;
   esp = esp + 4;
-  
+
   /* Divide the case */
   switch(argument_number)
   {
@@ -454,6 +406,7 @@ syscall_handler (struct intr_frame *f)
     case SYS_WRITE:
       get_argument(esp,argument,3);
       f->eax = sys_write(argument[0],argument[1],argument[2]);
+      printf("3\n");
       break;
 
     case SYS_SEEK:
@@ -498,4 +451,5 @@ syscall_handler (struct intr_frame *f)
     // case SYS_ISDIR:
     // case SYS_INUMBER:
   }
+  printf("finish\n");
 }

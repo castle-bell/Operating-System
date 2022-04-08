@@ -112,6 +112,13 @@ struct thread
 
     /* FDT */
     struct file* fdt[128];
+
+    /* For exec() */
+    struct semaphore exec_sema;
+    bool child_success_load;
+
+    /* Store running file */
+    struct file* file_run;
     
 #endif
 

@@ -18,6 +18,7 @@
 #include "threads/thread.h"
 #include "threads/vaddr.h"
 #include "threads/synch.h"
+#include "userprog/syscall.h"
 
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
@@ -125,7 +126,32 @@ process_execute (const char *file_name)
 
   /* Create a new thread to execute FILE_NAME. */
   tid = thread_create (token, PRI_DEFAULT, start_process, fn_copy);
+
+  /* Check the child process load executable succesfully */
+  struct thread *cur = thread_current();
+  struct thread *child = NULL;
+  struct list_elem *ptr = list_begin(&cur->sibling);
+
+  // for(ptr; ptr!=list_end(&cur->sibling); ptr=list_next(ptr))
+  // {
+  //   child = list_entry(ptr,struct thread,s_elem);
+  //   if(tid == child->tid)
+  //     break;
+  // }
+
+  // /* Find child! */
+  // if(ptr != list_end(&cur->sibling))
+  // {
+  //   /* Then sema down */
+  //   sema_down(&(child->exec_sema));
+  // }
+
+  /* Check whethre load success by checking exit status */
+  if(cur->wait_exit_status == -1)
+    tid = TID_ERROR;
+
   if (tid == TID_ERROR)
+
     palloc_free_page (fn_copy); 
   return tid;
 }
@@ -139,6 +165,9 @@ start_process (void *file_name_)
   struct intr_frame if_;
   bool success;
 
+  /* Store running file */
+  struct thread* cur = thread_current();
+
   /* Parsing the file_name */
   char *argument[64];
   int count;
@@ -151,15 +180,23 @@ start_process (void *file_name_)
   if_.cs = SEL_UCSEG;
   if_.eflags = FLAG_IF | FLAG_MBS;
   success = load (file_name, &if_.eip, &if_.esp);
-
+  
   /* Push the arguments to user stack */
   if(success)
+  {
     argument_stack(argument,count,&if_.esp);
+    cur->parent->child_success_load = true;
+  }
+  /* Reoperate the parent process */
+  sema_up(&(cur->exec_sema));
 
   /* If load failed, quit. */
   palloc_free_page (file_name);
-  if (!success) 
-    thread_exit ();
+  if (!success)
+  {
+    file_close(cur->file_run);
+    sys_exit(-1);
+  }
 
   /* Start the user process by simulating a return from an
      interrupt, implemented by intr_exit (in
@@ -185,7 +222,7 @@ process_wait (tid_t child_tid)
 {
   /* Search the descriptor of the child process */
   struct thread *cur = thread_current();
-  struct thread *child;
+  struct thread *child = NULL;
   struct list_elem *ptr = list_begin(&cur->sibling);
 
   for(ptr; ptr!=list_end(&cur->sibling); ptr=list_next(ptr))
@@ -436,7 +473,12 @@ load (const char *file_name, void (**eip) (void), void **esp)
 
  done:
   /* We arrive here whether the load is successful or not. */
-  file_close (file);
+  // file_close (file);
+
+  /* Deny file write */
+  if(file != NULL)
+    file_deny_write(file);
+  t->file_run = file;
   return success;
 }
 
