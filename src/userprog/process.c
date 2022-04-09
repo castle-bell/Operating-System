@@ -132,26 +132,25 @@ process_execute (const char *file_name)
   struct thread *child = NULL;
   struct list_elem *ptr = list_begin(&cur->sibling);
 
-  // for(ptr; ptr!=list_end(&cur->sibling); ptr=list_next(ptr))
-  // {
-  //   child = list_entry(ptr,struct thread,s_elem);
-  //   if(tid == child->tid)
-  //     break;
-  // }
+  for(ptr; ptr!=list_end(&cur->sibling); ptr=list_next(ptr))
+  {
+    child = list_entry(ptr,struct thread,s_elem);
+    if(tid == child->tid)
+      break;
+  }
 
-  // /* Find child! */
-  // if(ptr != list_end(&cur->sibling))
-  // {
-  //   /* Then sema down */
-  //   sema_down(&(child->exec_sema));
-  // }
+  /* Find child! */
+  if(ptr != list_end(&cur->sibling))
+  {
+    // if(cur->child_success_load == 0)
+    //   sema_down(&(child->exec_sema));
+  }
 
   /* Check whethre load success by checking exit status */
-  if(cur->wait_exit_status == -1)
+  if(cur->child_success_load == -1)
     tid = TID_ERROR;
 
   if (tid == TID_ERROR)
-
     palloc_free_page (fn_copy); 
   return tid;
 }
@@ -185,15 +184,17 @@ start_process (void *file_name_)
   if(success)
   {
     argument_stack(argument,count,&if_.esp);
-    cur->parent->child_success_load = true;
+    cur->parent->child_success_load = 1;
+    sema_up(&(cur->exec_sema));
   }
   /* Reoperate the parent process */
-  sema_up(&(cur->exec_sema));
 
   /* If load failed, quit. */
   palloc_free_page (file_name);
   if (!success)
   {
+    cur->parent->child_success_load = -1;
+    sema_up(&(cur->exec_sema));
     file_close(cur->file_run);
     sys_exit(-1);
   }
@@ -375,7 +376,6 @@ load (const char *file_name, void (**eip) (void), void **esp)
   off_t file_ofs;
   bool success = false;
   int i;
-
   /* Allocate and activate page directory. */
   t->pagedir = pagedir_create ();
   if (t->pagedir == NULL) 

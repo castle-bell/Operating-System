@@ -484,7 +484,7 @@ init_thread (struct thread *t, const char *name, int priority)
   sema_init(&(t->sema),0);
 
   /* Semaphore init for exec syscall */
-  t->child_success_load = false;
+  t->child_success_load = 0;
   sema_init(&(t->exec_sema),0);
 
   /* FDT setting */

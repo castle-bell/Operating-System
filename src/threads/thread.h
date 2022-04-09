@@ -115,7 +115,7 @@ struct thread
 
     /* For exec() */
     struct semaphore exec_sema;
-    bool child_success_load;
+    int child_success_load;
 
     /* Store running file */
     struct file* file_run;

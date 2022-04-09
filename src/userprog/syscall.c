@@ -116,6 +116,8 @@ int sys_wait(pid_t pid)
 bool sys_create(const char *file, unsigned initial_size)
 {
   lock_acquire(&filesys_lock);
+
+  bool create;
   if(!check_arg_validity((void *)file,20))
   {
     lock_release(&filesys_lock);
@@ -128,22 +130,25 @@ bool sys_create(const char *file, unsigned initial_size)
     lock_release(&filesys_lock);
     return false;
   }
-
+  create = filesys_create(file,initial_size);
   lock_release(&filesys_lock);
-  return filesys_create(file,initial_size);
+  return create;
 }
 
 bool sys_remove(const char *file)
 {
   lock_acquire(&filesys_lock);
+
+  bool remove;
   if(!check_arg_validity((void *)file,20))
   {
     lock_release(&filesys_lock);
     sys_exit(-1);
   }
 
+  remove = filesys_remove(file);
   lock_release(&filesys_lock);
-  return filesys_remove(file);
+  return remove;
 }
 
 int sys_open(const char *file)
@@ -181,6 +186,7 @@ int sys_open(const char *file)
 int sys_filesize(int fd)
 {
   lock_acquire(&filesys_lock);
+  int length;
   struct file* file;
   struct thread* cur = thread_current();
 
@@ -191,8 +197,9 @@ int sys_filesize(int fd)
     return -1;
   }
 
+  length = file_length(file);
   lock_release(&filesys_lock);
-  return file_length(file);
+  return length;
 }
 
 int sys_read(int fd, void *buffer, unsigned size)
@@ -313,6 +320,8 @@ void sys_seek(int fd, unsigned position)
 unsigned sys_tell(int fd)
 {
   lock_acquire(&filesys_lock);
+
+  unsigned tell;
   struct file* file;
   struct thread* cur = thread_current();
 
@@ -323,8 +332,9 @@ unsigned sys_tell(int fd)
     return -1;
   }
 
+  tell = file_tell(file);
   lock_release(&filesys_lock);
-  return file_tell(file);
+  return tell;
 }
 
 void sys_close(int fd)
