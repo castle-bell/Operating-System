@@ -127,31 +127,31 @@ process_execute (const char *file_name)
   /* Create a new thread to execute FILE_NAME. */
   tid = thread_create (token, PRI_DEFAULT, start_process, fn_copy);
 
-  /* Check the child process load executable succesfully */
-  struct thread *cur = thread_current();
-  struct thread *child = NULL;
-  struct list_elem *ptr = list_begin(&cur->sibling);
-
-  for(ptr; ptr!=list_end(&cur->sibling); ptr=list_next(ptr))
-  {
-    child = list_entry(ptr,struct thread,s_elem);
-    if(tid == child->tid)
-      break;
-  }
-
-  /* Find child! */
-  if(ptr != list_end(&cur->sibling))
-  {
-    // if(cur->child_success_load == 0)
-    //   sema_down(&(child->exec_sema));
-  }
-
-  /* Check whethre load success by checking exit status */
-  if(cur->child_success_load == -1)
-    tid = TID_ERROR;
-
   if (tid == TID_ERROR)
     palloc_free_page (fn_copy); 
+
+  /* Check load finish */
+  /* If success create child, then push into the list */
+  struct thread* child;
+  struct thread* cur = thread_current();
+
+  /* maybe need interrupt disable */
+  child = find_thread(tid);
+  child->parent = cur;
+  list_push_back(&(cur->sibling), &(child->s_elem));
+
+  /* wait child until load success or fail */
+  if(cur->child_success_load == 0)
+  {
+    sema_down(&(child->exec_sema));
+  }
+
+  /* Load fail */
+  if(cur->child_success_load == -1)
+  {
+    tid = TID_ERROR;
+  }
+  
   return tid;
 }
 
@@ -172,7 +172,6 @@ start_process (void *file_name_)
   int count;
   argument_parsing(&argument,&count,file_name);
   file_name = argument[0];
-  
   /* Initialize interrupt frame and load executable. */
   memset (&if_, 0, sizeof if_);
   if_.gs = if_.fs = if_.es = if_.ds = if_.ss = SEL_UDSEG;
@@ -180,12 +179,14 @@ start_process (void *file_name_)
   if_.eflags = FLAG_IF | FLAG_MBS;
   success = load (file_name, &if_.eip, &if_.esp);
   
+  // file_close(cur->file_run);
+  
   /* Push the arguments to user stack */
   if(success)
   {
-    argument_stack(argument,count,&if_.esp);
     cur->parent->child_success_load = 1;
     sema_up(&(cur->exec_sema));
+    argument_stack(argument,count,&if_.esp);
   }
   /* Reoperate the parent process */
 
@@ -195,7 +196,7 @@ start_process (void *file_name_)
   {
     cur->parent->child_success_load = -1;
     sema_up(&(cur->exec_sema));
-    file_close(cur->file_run);
+    /* may be need sema */
     sys_exit(-1);
   }
 
@@ -259,6 +260,15 @@ process_exit (void)
 {
   struct thread *cur = thread_current ();
   uint32_t *pd;
+
+  /* Close all file in current process */
+  int fd;
+  for(fd = 3; fd<128; fd++)
+  {
+    struct file* file;
+    if((file = cur->fdt[fd]) == NULL)
+      sys_close(fd);
+  }
 
   /* Destroy the current process's page directory and switch back
      to the kernel-only page directory. */
@@ -381,7 +391,6 @@ load (const char *file_name, void (**eip) (void), void **esp)
   if (t->pagedir == NULL) 
     goto done;
   process_activate ();
-
   /* Open executable file. */
   file = filesys_open (file_name);
   if (file == NULL) 
@@ -389,7 +398,6 @@ load (const char *file_name, void (**eip) (void), void **esp)
       printf ("load: %s: open failed\n", file_name);
       goto done; 
     }
-
   /* Read and verify executable header. */
   if (file_read (file, &ehdr, sizeof ehdr) != sizeof ehdr
       || memcmp (ehdr.e_ident, "\177ELF\1\1\1", 7)
@@ -476,9 +484,9 @@ load (const char *file_name, void (**eip) (void), void **esp)
   // file_close (file);
 
   /* Deny file write */
+  t->file_run = file;
   if(file != NULL)
     file_deny_write(file);
-  t->file_run = file;
   return success;
 }
 

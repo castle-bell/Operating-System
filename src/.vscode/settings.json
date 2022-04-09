@@ -10,6 +10,7 @@
         "main.h": "c",
         "lib.h": "c",
         "*.inc": "c",
-        "string_view": "c"
+        "string_view": "c",
+        "typeinfo": "c"
     }
 }

@@ -71,6 +71,28 @@ static void schedule (void);
 void thread_schedule_tail (struct thread *prev);
 static tid_t allocate_tid (void);
 
+struct thread *find_thread(tid_t tid)
+{
+  struct list_elem *e;
+  struct thread *t;
+
+  enum intr_level old_level;
+  old_level = intr_disable ();
+
+  for (e = list_begin (&all_list); e != list_end (&all_list);
+       e = list_next (e))
+  {
+      t = list_entry (e, struct thread, allelem);
+      if(t->tid == tid)
+        break;
+  }
+  if(e == list_end(&all_list))
+    t = NULL;
+
+  intr_set_level (old_level);
+  return t;
+}
+
 /* Initializes the threading system by transforming the code
    that's currently running into a thread.  This can't work in
    general and it is possible in this case only because loader.S
@@ -199,12 +221,6 @@ thread_create (const char *name, int priority,
   sf->eip = switch_entry;
   sf->ebp = 0;
 
-  /* Process hierarchy */
-  t->parent = thread_current();
-  list_push_back(&(thread_current()->sibling), &(t->s_elem));
-
-  /* Set sema down if parents wait */
-
   /* Add to run queue. */
   thread_unblock (t);
 
@@ -288,11 +304,9 @@ void
 thread_exit (void) 
 {
   ASSERT (!intr_context ());
-
 #ifdef USERPROG
   process_exit ();
 #endif
-
   /* Remove thread from all threads list, set our status to dying,
      and schedule another process.  That process will destroy us
      when it calls thread_schedule_tail(). */

@@ -78,15 +78,15 @@ void sys_exit(int status)
   /* Save exit status at process descriptor*/
 
   printf("%s: exit(%d)\n",cur->name,status);
-
   if(cur->is_parent_wait == true)
   {
     cur->parent->child_normal_exit = true;
     cur->parent->wait_exit_status = status;
     /* Pop the cur thread from parent */
-    list_remove(&cur->s_elem);
     sema_up(&(cur->sema));
   }
+
+  list_remove(&cur->s_elem);
   /* Close running file */
   file_close(cur->file_run);
   thread_exit();
@@ -102,7 +102,13 @@ pid_t sys_exec(const char *cmd_line)
   }
 
   tid_t result;
-  result = process_execute(cmd_line);
+  result = process_execute(cmd_line); 
+
+  if(result == TID_ERROR)
+  {
+    lock_release(&filesys_lock);
+    return result;
+  }
 
   lock_release(&filesys_lock);
   return (pid_t)result;
@@ -367,7 +373,10 @@ void sys_sigaction(int signum, void (*handler) (void))
 
 void sys_sendsig(pid_t pid, int signum)
 {
-
+  /* Check the range of signum */
+  if(signum < 1 || signum > 3)
+    return;
+  
 }
 
 void sched_yield()
@@ -483,10 +492,12 @@ syscall_handler (struct intr_frame *f)
 
     case SYS_SIGACTION:
       get_argument(esp,argument,2);
+      sys_sigaction(argument[0],argument[1]);
       break;
 
     case SYS_SENDSIG:
       get_argument(esp,argument,2);
+      sys_sendsig(argument[0],argument[1]);
       break;
 
     case SYS_YIELD:
