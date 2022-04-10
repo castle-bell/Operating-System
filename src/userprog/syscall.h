@@ -7,8 +7,6 @@
 #include "../threads/thread.h"
 #include "../lib/user/syscall.h"
 
-struct lock filesys_lock;
-
 void syscall_init (void);
 
 bool check_esp_validity(void *esp);

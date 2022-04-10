@@ -109,6 +109,7 @@ struct thread
     bool is_parent_wait;
     bool child_normal_exit;
     struct semaphore sema;
+    struct semaphore wait_parent;
 
     /* FDT */
     struct file* fdt[128];
@@ -119,6 +120,11 @@ struct thread
 
     /* Store running file */
     struct file* file_run;
+
+    /* For implement sys_send */
+    void (*eip1) (void); /* SIGNUM1 */ 
+    void (*eip2) (void); /* SIGNUM2 */
+    void (*eip3) (void); /* SIGNUM3 */
     
 #endif
 

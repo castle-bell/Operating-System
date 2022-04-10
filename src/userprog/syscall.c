@@ -10,6 +10,8 @@
 #include "userprog/pagedir.h"
 #include "../threads/palloc.h"
 
+struct lock filesys_lock;
+
 static void syscall_handler (struct intr_frame *);
 
 /* Check the validity of pointers */
@@ -74,7 +76,11 @@ void sys_halt(void)
 
 void sys_exit(int status)
 {
+  
   struct thread *cur = thread_current();
+  /* First all child process stop until parent call wait */
+  sema_down(&cur->wait_parent);
+
   /* Save exit status at process descriptor*/
 
   printf("%s: exit(%d)\n",cur->name,status);
@@ -84,9 +90,9 @@ void sys_exit(int status)
     cur->parent->wait_exit_status = status;
     /* Pop the cur thread from parent */
     sema_up(&(cur->sema));
+    list_remove(&cur->s_elem);
   }
 
-  list_remove(&cur->s_elem);
   /* Close running file */
   file_close(cur->file_run);
   thread_exit();
@@ -94,22 +100,13 @@ void sys_exit(int status)
 
 pid_t sys_exec(const char *cmd_line)
 {
-  lock_acquire(&filesys_lock);
   if(!check_arg_validity((void *)cmd_line,4000))
   {
-    lock_release(&filesys_lock);
     sys_exit(-1);
   }
-
+  lock_acquire(&filesys_lock);
   tid_t result;
   result = process_execute(cmd_line); 
-
-  if(result == TID_ERROR)
-  {
-    lock_release(&filesys_lock);
-    return result;
-  }
-
   lock_release(&filesys_lock);
   return (pid_t)result;
 }
@@ -121,15 +118,14 @@ int sys_wait(pid_t pid)
 
 bool sys_create(const char *file, unsigned initial_size)
 {
-  lock_acquire(&filesys_lock);
 
   bool create;
   if(!check_arg_validity((void *)file,20))
   {
-    lock_release(&filesys_lock);
     sys_exit(-1);
   }
 
+  lock_acquire(&filesys_lock);
   /* If file_name = [], then exit */
   if(strlen(file) == 0)
   {
@@ -143,15 +139,12 @@ bool sys_create(const char *file, unsigned initial_size)
 
 bool sys_remove(const char *file)
 {
-  lock_acquire(&filesys_lock);
-
   bool remove;
   if(!check_arg_validity((void *)file,20))
   {
-    lock_release(&filesys_lock);
     sys_exit(-1);
   }
-
+  lock_acquire(&filesys_lock);
   remove = filesys_remove(file);
   lock_release(&filesys_lock);
   return remove;
@@ -159,12 +152,12 @@ bool sys_remove(const char *file)
 
 int sys_open(const char *file)
 {
-  lock_acquire(&filesys_lock);
   if(!check_arg_validity((void *)file,20))
   {
-    lock_release(&filesys_lock);
     sys_exit(-1);
   }
+
+  lock_acquire(&filesys_lock);
 
   struct file* open_file;
   struct thread* cur = thread_current();
@@ -185,6 +178,11 @@ int sys_open(const char *file)
       break;
   }
   cur->fdt[fd] = open_file;
+
+  /* Deny if executable file */
+  // if(!strcmp(thread_current()->name, file))
+  //   file_deny_write(file);
+
   lock_release(&filesys_lock);
   return fd;
 }
@@ -361,14 +359,27 @@ void sys_close(int fd)
   {
     /* Only close the file if fd is valid */
     file_close(file);
-    file = cur->fdt[fd] = NULL;
+    cur->fdt[fd] = NULL;
   }
   lock_release(&filesys_lock);
 }
 
 void sys_sigaction(int signum, void (*handler) (void))
 {
+  /* Check the range of signum */
+  if(signum < 1 || signum > 3)
+    return;
 
+  struct thread *cur = thread_current();
+
+  if(signum == 1)
+    cur->eip1 = handler;
+
+  else if(signum == 2)
+    cur->eip2 = handler;
+
+  else /*signum == 3 */
+    cur->eip3 = handler;
 }
 
 void sys_sendsig(pid_t pid, int signum)
@@ -377,6 +388,15 @@ void sys_sendsig(pid_t pid, int signum)
   if(signum < 1 || signum > 3)
     return;
   
+  /* Check valid pid */
+  struct thread* t = find_thread((tid_t)pid);
+  
+  if(t == NULL)
+    return;
+  
+
+
+
 }
 
 void sched_yield()

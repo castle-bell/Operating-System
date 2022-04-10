@@ -194,7 +194,6 @@ thread_create (const char *name, int priority,
   struct switch_entry_frame *ef;
   struct switch_threads_frame *sf;
   tid_t tid;
-
   ASSERT (function != NULL);
 
   /* Allocate thread. */
@@ -487,7 +486,6 @@ init_thread (struct thread *t, const char *name, int priority)
 
   old_level = intr_disable ();
   list_push_back (&all_list, &t->allelem);
-  intr_set_level (old_level);
 
 #ifdef USERPROG
   /* Process hierarchy */
@@ -496,6 +494,7 @@ init_thread (struct thread *t, const char *name, int priority)
   /* Semaphore init for wait child process */
   t->is_parent_wait = false;
   sema_init(&(t->sema),0);
+  sema_init(&(t->wait_parent),0);
 
   /* Semaphore init for exec syscall */
   t->child_success_load = 0;
@@ -507,13 +506,23 @@ init_thread (struct thread *t, const char *name, int priority)
     t->fdt[i] = NULL;
   }
 
+  struct thread* cur = running_thread();
+  t->parent = cur;
+  list_push_back(&(cur->sibling), &(t->s_elem));
+
   /* Killed */
   t->child_normal_exit = false;
 
   /* Store running file */
   t->file_run = NULL;
 
+  /* Signal */
+  t->eip1 = NULL;
+  t->eip2 = NULL;
+  t->eip3 = NULL;
+
 #endif
+  intr_set_level (old_level);
 }
 
 /* Allocates a SIZE-byte frame at the top of thread T's stack and

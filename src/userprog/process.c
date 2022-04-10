@@ -95,7 +95,19 @@ void argument_stack(char **argument, int count, void **esp)
   **((int **)esp) = (uint32_t)(void *)0;
 }
 
+struct thread *find_child(tid_t tid, struct list *sibling)
+{
+  struct list_elem *e;
+  struct thread *child;
 
+  for(e=list_begin(sibling); e->next != NULL; e=list_next(e))
+  {
+    child = list_entry(e,struct thread,s_elem);
+    if(child->tid == tid)
+      return child;
+  }
+  return NULL;
+}
 
 /* Starts a new thread running a user program loaded from
    FILENAME.  The new thread may be scheduled (and may even exit)
@@ -110,7 +122,6 @@ process_execute (const char *file_name)
   char copy[256]; // why 4KB?
   char *token;
   char *save_ptr;
-
   /* Make a copy of FILE_NAME.
      Otherwise there's a race between the caller and load(). */
   fn_copy = palloc_get_page (0);
@@ -124,6 +135,11 @@ process_execute (const char *file_name)
   if(token == NULL)
     token = copy;
 
+  // /* ADDD */
+  // if(filesys_open(token) == NULL){
+  //   return -1;
+  // }
+
   /* Create a new thread to execute FILE_NAME. */
   tid = thread_create (token, PRI_DEFAULT, start_process, fn_copy);
 
@@ -135,10 +151,15 @@ process_execute (const char *file_name)
   struct thread* child;
   struct thread* cur = thread_current();
 
-  /* maybe need interrupt disable */
-  child = find_thread(tid);
-  child->parent = cur;
-  list_push_back(&(cur->sibling), &(child->s_elem));
+  // struct thread* child;
+  // struct thread* cur = running_thread();
+  // child = find_thread(tid);
+  // child->parent = cur;
+  // list_push_back(&(cur->sibling), &(child->s_elem));
+  child = find_child(tid,&cur->sibling);
+
+  if(child == NULL)
+    return -1;
 
   /* wait child until load success or fail */
   if(cur->child_success_load == 0)
@@ -152,6 +173,8 @@ process_execute (const char *file_name)
     tid = TID_ERROR;
   }
   
+  cur->child_success_load = 0;
+
   return tid;
 }
 
@@ -166,7 +189,6 @@ start_process (void *file_name_)
 
   /* Store running file */
   struct thread* cur = thread_current();
-
   /* Parsing the file_name */
   char *argument[64];
   int count;
@@ -178,15 +200,14 @@ start_process (void *file_name_)
   if_.cs = SEL_UCSEG;
   if_.eflags = FLAG_IF | FLAG_MBS;
   success = load (file_name, &if_.eip, &if_.esp);
-  
   // file_close(cur->file_run);
   
   /* Push the arguments to user stack */
   if(success)
   {
     cur->parent->child_success_load = 1;
-    sema_up(&(cur->exec_sema));
     argument_stack(argument,count,&if_.esp);
+    sema_up(&(cur->exec_sema));
   }
   /* Reoperate the parent process */
 
@@ -199,7 +220,6 @@ start_process (void *file_name_)
     /* may be need sema */
     sys_exit(-1);
   }
-
   /* Start the user process by simulating a return from an
      interrupt, implemented by intr_exit (in
      threads/intr-stubs.S).  Because intr_exit takes all of its
@@ -225,18 +245,18 @@ process_wait (tid_t child_tid)
   /* Search the descriptor of the child process */
   struct thread *cur = thread_current();
   struct thread *child = NULL;
-  struct list_elem *ptr = list_begin(&cur->sibling);
 
-  for(ptr; ptr!=list_end(&cur->sibling); ptr=list_next(ptr))
-  {
-    child = list_entry(ptr,struct thread,s_elem);
-    if(child_tid == child->tid)
-      break;
-  }
-  
-  /* Error case(no child), return -1 for failure */
-  if(ptr == list_end(&cur->sibling))
+  child = find_child(child_tid, &cur->sibling);
+
+  if(child == NULL)
     return -1;
+
+  enum intr_level old_level;
+  old_level = intr_disable();
+  /* Every child is stopped, so first sema_up */
+  sema_up(&child->wait_parent);
+
+
   /* Already wait for this child */
   if((child->is_parent_wait) == true)
     return -1;
@@ -244,10 +264,15 @@ process_wait (tid_t child_tid)
   /* Set the child process' bool is parent wait true */
   child->is_parent_wait = true;
   sema_down(&(child->sema));
+  
+  intr_set_level(old_level);
+
+  // palloc_free_page(child);
 
   /* If killed, return -1 */
   if(!cur->child_normal_exit)
   {
+    cur->child_normal_exit = false;
     return -1;
   }
 
@@ -266,8 +291,19 @@ process_exit (void)
   for(fd = 3; fd<128; fd++)
   {
     struct file* file;
-    if((file = cur->fdt[fd]) == NULL)
+    if((file = cur->fdt[fd]) != NULL)
       sys_close(fd);
+  }
+
+  /* Sema up all child process and finish it */
+  struct list *ls = &(cur->sibling);
+  struct list_elem *t;
+  t = list_begin(ls);
+  for(t; t != list_end(ls); t = list_next(t))
+  {
+    struct thread *child = list_entry(t,struct thread,s_elem);
+    /* Sema up semaphore of child */
+    sema_up(&(child->wait_parent));
   }
 
   /* Destroy the current process's page directory and switch back
@@ -481,7 +517,6 @@ load (const char *file_name, void (**eip) (void), void **esp)
 
  done:
   /* We arrive here whether the load is successful or not. */
-  // file_close (file);
 
   /* Deny file write */
   t->file_run = file;
