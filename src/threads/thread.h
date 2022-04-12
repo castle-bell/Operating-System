@@ -125,6 +125,7 @@ struct thread
     void (*eip1) (void); /* SIGNUM1 */ 
     void (*eip2) (void); /* SIGNUM2 */
     void (*eip3) (void); /* SIGNUM3 */
+    int sig[10]; /* Store received signal */
     
 #endif
 

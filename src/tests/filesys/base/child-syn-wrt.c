@@ -23,11 +23,13 @@ main (int argc, char *argv[])
 
   random_init (0);
   random_bytes (buf, sizeof buf);
+
   CHECK ((fd = open (file_name)) > 1, "open \"%s\"", file_name);
   seek (fd, CHUNK_SIZE * child_idx);
   CHECK (write (fd, buf + CHUNK_SIZE * child_idx, CHUNK_SIZE) > 0,
          "write \"%s\"", file_name);
   msg ("close \"%s\"", file_name);
   close (fd);
+
   return child_idx;
 }

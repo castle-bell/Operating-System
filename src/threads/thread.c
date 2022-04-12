@@ -520,6 +520,8 @@ init_thread (struct thread *t, const char *name, int priority)
   t->eip1 = NULL;
   t->eip2 = NULL;
   t->eip3 = NULL;
+  for(int i = 0; i<10; i++)
+    t->sig[i] = 0;
 
 #endif
   intr_set_level (old_level);

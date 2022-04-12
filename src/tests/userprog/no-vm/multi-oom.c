@@ -111,6 +111,7 @@ main (int argc, char *argv[])
   bool is_at_root = (n == 0);
   if (is_at_root)
     msg ("begin");
+
   /* If -k is passed, crash this process. */
   if (argc > 2 && !strcmp(argv[2], "-k"))
     {
@@ -142,6 +143,7 @@ main (int argc, char *argv[])
 
       /* Now spawn the child that will recurse. */
       child_pid = spawn_child (n + 1, RECURSE);
+
       /* If maximum depth is reached, return result. */
       if (child_pid == -1)
         return n;

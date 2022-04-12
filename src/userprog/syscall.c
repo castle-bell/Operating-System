@@ -394,9 +394,14 @@ void sys_sendsig(pid_t pid, int signum)
   if(t == NULL)
     return;
   
-
-
-
+  for(int i = 0; i<10; i++)
+  {
+    if(t->sig[i] == 0)
+    {
+      t->sig[i] = signum;
+      break;
+    }
+  }
 }
 
 void sched_yield()
@@ -522,21 +527,56 @@ syscall_handler (struct intr_frame *f)
 
     case SYS_YIELD:
       get_argument(esp,argument,0);
+      thread_yield();
       break;
 
     default:
       sys_exit(-1);
-    // /* Project 3 */
-    // case SYS_MMAP:
-    //   get_argument(&f->esp,argument,1);
-    // case SYS_MUNMAP:
-    //   get_argument(&f->esp,argument,1);
+  }
+  
+  /* 나중에 race condition도 생각하기 */
+  /* 핸들러는 만들었는데 나중에 생성되는 경우 시그널이 무시될 수 있음 */
+  /* Check if there is any signal comes to process */
+  struct thread* cur = thread_current();
+  for(int i = 0; i<10; i++)
+  {
+    int *sig = &(cur->sig[i]);
+    /* Signal exists */
+    if(*sig != 0)
+    {
+      /* Signum 1 */
+      if(*sig == 1)
+      {
+        if(cur->eip1 != NULL)
+        {
+          printf("Signum: 1, Action: %p\n",cur->eip1);
+          cur->eip1 = NULL;
+          *sig = 0;
 
-    // /* Project 4 */
-    // case SYS_CHDIR:
-    // case SYS_MKDIR:
-    // case SYS_READDIR:
-    // case SYS_ISDIR:
-    // case SYS_INUMBER:
+        }
+      }
+      /* Signum 2*/
+      else if(*sig == 2)
+      {
+        if(cur->eip2 != NULL)
+        {
+          printf("Signum: 2, Action: %p\n",cur->eip2);
+          cur->eip2 = NULL;
+          *sig = 0;
+        }
+      }
+      /* Signum 3*/
+      else
+      {
+        if(cur->eip3 != NULL)
+        {
+          printf("Signum: 3, Action: %p\n",cur->eip3);
+          cur->eip3 = NULL;
+          *sig = 0;
+        }
+      }
+    }
+    else
+      break;
   }
 }
