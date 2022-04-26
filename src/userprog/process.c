@@ -17,9 +17,97 @@
 #include "threads/palloc.h"
 #include "threads/thread.h"
 #include "threads/vaddr.h"
+#include "threads/synch.h"
+#include "userprog/syscall.h"
 
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
+
+void argument_parsing(char *argument[], int* count, char* file_name)
+{
+  int i = 0;
+  char *save_ptr;
+  char *ptr = strtok_r(file_name," ",&save_ptr);
+  while(1)
+  {
+    if((ptr == NULL) || i >= 64)
+      break;
+    argument[i] = ptr;
+    i++;
+    ptr = strtok_r(NULL," ",&save_ptr);
+  }
+  argument[i] = NULL;
+  *count = i;
+}
+
+void argument_stack(char **argument, int count, void **esp)
+{
+  ASSERT(argument[count] == NULL);
+  int i;
+  int j;
+  int len = 0;
+  int padding = 0;
+
+  /* First push the all argument including \0 */
+  for(i=count-1; i>=0; i--)
+  {
+    len = strlen(argument[i]);
+    for(j=len; j>=0; j--)
+    {
+      *esp = *esp - 1; /* To store char */
+      **(char**)esp = argument[i][j];
+      padding += 1;
+    }
+    argument[i] = *esp;
+  } 
+  /* Add padding */
+  if((padding % 4) == 0)
+    padding = 0;
+  else
+    padding = 4 - (padding % 4);
+  
+  for(i=0; i<padding; i++)
+  {
+    *esp = *esp - 1; /* To store char */
+    **((uint8_t**)esp) = (uint8_t)0;
+  }
+
+  /* Push argument's address, pintos is 80x86 architecture,
+    size of pointer is 4bytes. */
+  
+  for(i=count; i>=0; i--)
+  {
+    *esp = *esp - 4; /* To store char* */
+    *(char**)*esp = argument[i];
+  }
+  argument = *esp;
+
+  /* Push argument pointer */
+  *esp = *esp - 4;
+  **(uint32_t **)esp = (uint32_t)argument;
+
+  /* Push # of argument */
+  *esp = *esp - 4;
+  **((int**)esp) = count;
+
+  /* Push false address */
+  *esp = *esp - 4;
+  **((int **)esp) = (uint32_t)(void *)0;
+}
+
+struct thread *find_child(tid_t tid, struct list *sibling)
+{
+  struct list_elem *e;
+  struct thread *child;
+
+  for(e=list_begin(sibling); e->next != NULL; e=list_next(e))
+  {
+    child = list_entry(e,struct thread,s_elem);
+    if(child->tid == tid)
+      return child;
+  }
+  return NULL;
+}
 
 /* Starts a new thread running a user program loaded from
    FILENAME.  The new thread may be scheduled (and may even exit)
@@ -31,17 +119,62 @@ process_execute (const char *file_name)
   char *fn_copy;
   tid_t tid;
 
+  char copy[256]; // why 4KB?
+  char *token;
+  char *save_ptr;
   /* Make a copy of FILE_NAME.
      Otherwise there's a race between the caller and load(). */
   fn_copy = palloc_get_page (0);
   if (fn_copy == NULL)
     return TID_ERROR;
   strlcpy (fn_copy, file_name, PGSIZE);
+  strlcpy (copy, file_name, PGSIZE);
+
+  /* Parsing the file_name */
+  token = strtok_r(copy," ",&save_ptr);
+  if(token == NULL)
+    token = copy;
+
+  // /* ADDD */
+  // if(filesys_open(token) == NULL){
+  //   return -1;
+  // }
 
   /* Create a new thread to execute FILE_NAME. */
-  tid = thread_create (file_name, PRI_DEFAULT, start_process, fn_copy);
+  tid = thread_create (token, PRI_DEFAULT, start_process, fn_copy);
+
   if (tid == TID_ERROR)
     palloc_free_page (fn_copy); 
+
+  /* Check load finish */
+  /* If success create child, then push into the list */
+  struct thread* child;
+  struct thread* cur = thread_current();
+
+  // struct thread* child;
+  // struct thread* cur = running_thread();
+  // child = find_thread(tid);
+  // child->parent = cur;
+  // list_push_back(&(cur->sibling), &(child->s_elem));
+  child = find_child(tid,&cur->sibling);
+
+  if(child == NULL)
+    return -1;
+
+  /* wait child until load success or fail */
+  if(cur->child_success_load == 0)
+  {
+    sema_down(&(child->exec_sema));
+  }
+
+  /* Load fail */
+  if(cur->child_success_load == -1)
+  {
+    tid = TID_ERROR;
+  }
+  
+  cur->child_success_load = 0;
+
   return tid;
 }
 
@@ -54,18 +187,39 @@ start_process (void *file_name_)
   struct intr_frame if_;
   bool success;
 
+  /* Store running file */
+  struct thread* cur = thread_current();
+  /* Parsing the file_name */
+  char *argument[64];
+  int count;
+  argument_parsing(&argument,&count,file_name);
+  file_name = argument[0];
   /* Initialize interrupt frame and load executable. */
   memset (&if_, 0, sizeof if_);
   if_.gs = if_.fs = if_.es = if_.ds = if_.ss = SEL_UDSEG;
   if_.cs = SEL_UCSEG;
   if_.eflags = FLAG_IF | FLAG_MBS;
   success = load (file_name, &if_.eip, &if_.esp);
+  // file_close(cur->file_run);
+  
+  /* Push the arguments to user stack */
+  if(success)
+  {
+    cur->parent->child_success_load = 1;
+    argument_stack(argument,count,&if_.esp);
+    sema_up(&(cur->exec_sema));
+  }
+  /* Reoperate the parent process */
 
   /* If load failed, quit. */
   palloc_free_page (file_name);
-  if (!success) 
-    thread_exit ();
-
+  if (!success)
+  {
+    cur->parent->child_success_load = -1;
+    sema_up(&(cur->exec_sema));
+    /* may be need sema */
+    sys_exit(-1);
+  }
   /* Start the user process by simulating a return from an
      interrupt, implemented by intr_exit (in
      threads/intr-stubs.S).  Because intr_exit takes all of its
@@ -86,9 +240,43 @@ start_process (void *file_name_)
    This function will be implemented in problem 2-2.  For now, it
    does nothing. */
 int
-process_wait (tid_t child_tid UNUSED) 
+process_wait (tid_t child_tid) 
 {
-  return -1;
+  /* Search the descriptor of the child process */
+  struct thread *cur = thread_current();
+  struct thread *child = NULL;
+
+  child = find_child(child_tid, &cur->sibling);
+
+  if(child == NULL)
+    return -1;
+
+  enum intr_level old_level;
+  old_level = intr_disable();
+  /* Every child is stopped, so first sema_up */
+  sema_up(&child->wait_parent);
+
+
+  /* Already wait for this child */
+  if((child->is_parent_wait) == true)
+    return -1;
+  /* Wait until the child process terminates using sema_down */
+  /* Set the child process' bool is parent wait true */
+  child->is_parent_wait = true;
+  sema_down(&(child->sema));
+  
+  intr_set_level(old_level);
+
+  // palloc_free_page(child);
+
+  /* If killed, return -1 */
+  if(!cur->child_normal_exit)
+  {
+    cur->child_normal_exit = false;
+    return -1;
+  }
+
+  return cur->wait_exit_status;
 }
 
 /* Free the current process's resources. */
@@ -97,6 +285,26 @@ process_exit (void)
 {
   struct thread *cur = thread_current ();
   uint32_t *pd;
+
+  /* Close all file in current process */
+  int fd;
+  for(fd = 3; fd<128; fd++)
+  {
+    struct file* file;
+    if((file = cur->fdt[fd]) != NULL)
+      sys_close(fd);
+  }
+
+  /* Sema up all child process and finish it */
+  struct list *ls = &(cur->sibling);
+  struct list_elem *t;
+  t = list_begin(ls);
+  for(t; t != list_end(ls); t = list_next(t))
+  {
+    struct thread *child = list_entry(t,struct thread,s_elem);
+    /* Sema up semaphore of child */
+    sema_up(&(child->wait_parent));
+  }
 
   /* Destroy the current process's page directory and switch back
      to the kernel-only page directory. */
@@ -214,13 +422,11 @@ load (const char *file_name, void (**eip) (void), void **esp)
   off_t file_ofs;
   bool success = false;
   int i;
-
   /* Allocate and activate page directory. */
   t->pagedir = pagedir_create ();
   if (t->pagedir == NULL) 
     goto done;
   process_activate ();
-
   /* Open executable file. */
   file = filesys_open (file_name);
   if (file == NULL) 
@@ -228,7 +434,6 @@ load (const char *file_name, void (**eip) (void), void **esp)
       printf ("load: %s: open failed\n", file_name);
       goto done; 
     }
-
   /* Read and verify executable header. */
   if (file_read (file, &ehdr, sizeof ehdr) != sizeof ehdr
       || memcmp (ehdr.e_ident, "\177ELF\1\1\1", 7)
@@ -312,7 +517,11 @@ load (const char *file_name, void (**eip) (void), void **esp)
 
  done:
   /* We arrive here whether the load is successful or not. */
-  file_close (file);
+
+  /* Deny file write */
+  t->file_run = file;
+  if(file != NULL)
+    file_deny_write(file);
   return success;
 }
 

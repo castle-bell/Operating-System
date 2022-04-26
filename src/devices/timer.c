@@ -86,15 +86,14 @@ timer_elapsed (int64_t then)
 
 /* Sleeps for approximately TICKS timer ticks.  Interrupts must
    be turned on. */
-/* busy waiting -> sleep/awake waiting */
 void
 timer_sleep (int64_t ticks) 
 {
   int64_t start = timer_ticks ();
 
   ASSERT (intr_get_level () == INTR_ON);
-
-  thread_sleep(start+ticks);
+  while (timer_elapsed (start) < ticks) 
+    thread_yield ();
 }
 
 /* Sleeps for approximately MS milliseconds.  Interrupts must be
@@ -172,25 +171,6 @@ static void
 timer_interrupt (struct intr_frame *args UNUSED)
 {
   ticks++;
-  if(thread_mlfqs)
-  {
-    /* The order of if is important because the case of
-    timer_ticks() % TIMER_FREQ == 0 && % 4 == 0 */
-    /* In every second, recalculate load_avg, recent_cpu, priority */
-    mlfqs_increment();
-    if(timer_ticks() % TIMER_FREQ == 0)
-    {
-      mlfqs_load_avg();
-      mlfqs_recalc(1);
-    }
-    /* In every 4th tick, recalculate priority of all threads */
-    if(timer_ticks() % 4 == 0)
-    {
-      mlfqs_recalc(0);
-    }
-  }
-  if(min_ticks<=ticks)
-    thread_wakeup(ticks);
   thread_tick ();
 }
 

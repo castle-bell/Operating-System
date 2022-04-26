@@ -1,6 +1,5 @@
 #include "list.h"
 #include "../debug.h"
-#include "../../threads/synch.h"
 
 /* Our doubly linked lists have two header elements: the "head"
    just before the first element and the "tail" just after the
@@ -55,87 +54,6 @@ static inline bool
 is_tail (struct list_elem *elem)
 {
   return elem != NULL && elem->prev != NULL && elem->next == NULL;
-}
-
-/* Various function of lock_list(single linked list) */
-
-/* Initializes Lock_List as an empty list. */
-void
-locks_init (struct lock_list *locks)
-{
-  ASSERT (locks != NULL);
-  locks->head = NULL;
-}
-
-/* Returns the beginning of locks.  */
-struct lock *
-locks_begin (struct lock_list *locks)
-{
-  ASSERT (locks != NULL);
-  return locks->head;
-}
-
-struct lock *
-locks_next (struct lock* lock)
-{
-  ASSERT (lock != NULL);
-  return lock->next;
-}
-
-bool
-is_lock_end (struct lock* lock)
-{
-  ASSERT (lock != NULL);
-  return lock->next == NULL;
-}
-
-bool
-is_locks_empty (struct lock_list *locks)
-{
-  ASSERT (locks != NULL);
-  return locks->head == NULL;
-}
-
-void
-lock_push_front (struct lock_list *locks, struct lock* lock)
-{
-  ASSERT (lock != NULL);
-  ASSERT (locks != NULL);
-  if(is_locks_empty(locks))
-    locks->head = lock;
-  else
-  {
-    lock->next = locks->head;
-    locks->head = lock;
-  }
-}
-
-void
-lock_pop(struct lock_list *locks, struct lock* lock)
-{
-  ASSERT (lock != NULL);
-  ASSERT (locks != NULL);
-  ASSERT (!is_locks_empty(locks));
-  struct lock *prev = NULL;
-  struct lock *start = locks->head;
-  /* Find the location before lock in lock_list */
-  while(start != NULL)
-  {
-    if(start == lock)
-      break;
-    prev = start;
-    start = start->next;
-  }
-  if(prev == NULL) 
-  {
-    locks->head = start->next;
-    start->next = NULL;
-  }
-  else
-  {
-    prev->next = start->next;
-    start->next = NULL;
-  }
 }
 
 /* Initializes LIST as an empty list. */
@@ -533,6 +451,7 @@ list_insert_ordered (struct list *list, struct list_elem *elem,
   ASSERT (list != NULL);
   ASSERT (elem != NULL);
   ASSERT (less != NULL);
+
   for (e = list_begin (list); e != list_end (list); e = list_next (e))
     if (less (elem, e, aux))
       break;

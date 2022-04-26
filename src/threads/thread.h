@@ -4,6 +4,8 @@
 #include <debug.h>
 #include <list.h>
 #include <stdint.h>
+#include "./synch.h"
+#include "../filesys/file.h"
 
 /* States in a thread's life cycle. */
 enum thread_status
@@ -23,12 +25,6 @@ typedef int tid_t;
 #define PRI_MIN 0                       /* Lowest priority. */
 #define PRI_DEFAULT 31                  /* Default priority. */
 #define PRI_MAX 63                      /* Highest priority. */
-
-/* global min_ticks */
-int64_t min_ticks;
-
-/* 17.14 fixed_point number 1 */
-#define F (1<<14)
 
 /* A kernel thread or user process.
 
@@ -94,26 +90,43 @@ struct thread
     char name[16];                      /* Name (for debugging purposes). */
     uint8_t *stack;                     /* Saved stack pointer. */
     int priority;                       /* Priority. */
-    int64_t wakeup_ticks;              /* the ticks that thread have to wake up */
     struct list_elem allelem;           /* List element for all threads list. */
-    struct list_elem elem;              /* List element. */
 
     /* Shared between thread.c and synch.c. */
-    int rep_priority;                   /* store the origin priority */
-    struct lock *wait_on_lock;          /* lock that it waits for */
-    struct list_elem w_elem;            /* list element for waiters list in semaphore */
-    struct lock_list locks;             /* Store the locks that thread has */
-
-    /* Advanced Scheduler(mlfqs) */
-    int nice;
-    int recent_cpu;
-
-    /* latency */
-    int64_t latency;
+    struct list_elem elem;              /* List element. */
 
 #ifdef USERPROG
     /* Owned by userprog/process.c. */
     uint32_t *pagedir;                  /* Page directory. */
+
+     /* Process Hierarchy */
+    struct thread* parent;
+    struct list sibling;
+    struct list_elem s_elem;
+
+    /* For wait(), exit() */
+    int wait_exit_status;
+    bool is_parent_wait;
+    bool child_normal_exit;
+    struct semaphore sema;
+    struct semaphore wait_parent;
+
+    /* FDT */
+    struct file* fdt[128];
+
+    /* For exec() */
+    struct semaphore exec_sema;
+    int child_success_load;
+
+    /* Store running file */
+    struct file* file_run;
+
+    /* For implement sys_send */
+    void (*eip1) (void); /* SIGNUM1 */ 
+    void (*eip2) (void); /* SIGNUM2 */
+    void (*eip3) (void); /* SIGNUM3 */
+    int sig[10]; /* Store received signal */
+    
 #endif
 
     /* Owned by thread.c. */
@@ -124,14 +137,12 @@ struct thread
    If true, use multi-level feedback queue scheduler.
    Controlled by kernel command-line option "-o mlfqs". */
 extern bool thread_mlfqs;
-extern bool thread_report_latency;
+
+/* Find thread */
+struct thread* find_thread(tid_t tid);
 
 void thread_init (void);
 void thread_start (void);
-void thread_sleep(int64_t ticks);
-void thread_wakeup(int64_t ticks);
-void preemption(void);
-void print_thread(struct thread *t, struct lock *lock);    /* Print the elements of thread */
 
 void thread_tick (void);
 void thread_print_stats (void);
@@ -156,44 +167,9 @@ void thread_foreach (thread_action_func *, void *);
 int thread_get_priority (void);
 void thread_set_priority (int);
 
-/* Fixed point number arithmetic function */
-int int_to_fp(int n);
-int fp_to_int(int x);
-int fp_to_int_round(int x);
-int add_fp(int x, int y);
-int add_mixed(int x, int n);
-int sub_fp(int x, int y);
-int sub_mixed(int x, int n);
-int mult_fp(int x, int y);
-int mult_mixed(int x, int n);
-int div_fp(int x, int y);
-int div_mixed(int x, int n);
-
-
-/* Added function to calculate load_avg, recent_cpu, priority */
-void mlfqs_priority(struct thread *t);
-void mlfqs_recent_cpu (struct thread *t);
-void mlfqs_load_avg (void);
-void mlfqs_increment (void);
-void mlfqs_recalc (int load);
-
 int thread_get_nice (void);
 void thread_set_nice (int);
 int thread_get_recent_cpu (void);
 int thread_get_load_avg (void);
-
-/* Fixed_point number arithmetic function */
-int int_to_fp(int n);
-int fp_to_int_round(int x);
-int fp_to_int(int x);
-int add_fp(int x, int y);
-int add_mixed(int x, int n);
-int sub_fp(int x, int y);
-int sub_mixed(int x, int n);
-int mult_fp(int x, int y);
-int mult_mixed(int x, int n);
-int div_fp(int x, int y);
-int div_mixed(int x, int n);
-
 
 #endif /* threads/thread.h */

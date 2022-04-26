@@ -8,4 +8,8 @@ int process_wait (tid_t);
 void process_exit (void);
 void process_activate (void);
 
+void argument_parsing(char **argument, int* count, char* file_name);
+void argument_stack(char **argument, int count, void **esp);
+struct thread *find_child(tid_t pid, struct list *sibling);
+
 #endif /* userprog/process.h */
