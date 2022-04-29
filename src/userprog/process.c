@@ -19,9 +19,13 @@
 #include "threads/vaddr.h"
 #include "threads/synch.h"
 #include "userprog/syscall.h"
+#include "../vm/page.h"
 
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
+static unsigned vm_hash_func(const struct hash_elem *e, void *aux UNUSED);
+static bool vm_less_func(const struct hash_elem *a, const struct hash_elem *b, void *aux UNUSED);
+
 
 void argument_parsing(char *argument[], int* count, char* file_name)
 {
@@ -189,6 +193,10 @@ start_process (void *file_name_)
 
   /* Store running file */
   struct thread* cur = thread_current();
+
+  /* Initialize hash table */
+  hash_init(&cur->vm,vm_hash_func,vm_less_func,NULL);
+
   /* Parsing the file_name */
   char *argument[64];
   int count;
@@ -305,6 +313,10 @@ process_exit (void)
     /* Sema up semaphore of child */
     sema_up(&(child->wait_parent));
   }
+
+  /* Delete vm_entry and hash_table */
+  hash_destroy(&cur->vm,NULL);
+  /* 나중에 vm_entry 삭제하는 것도 넣기 */
 
   /* Destroy the current process's page directory and switch back
      to the kernel-only page directory. */
@@ -527,7 +539,7 @@ load (const char *file_name, void (**eip) (void), void **esp)
 
 /* load() helpers. */
 
-static bool install_page (void *upage, void *kpage, bool writable);
+bool install_page (void *upage, void *kpage, bool writable);
 
 /* Checks whether PHDR describes a valid, loadable segment in
    FILE and returns true if so, false otherwise. */
@@ -605,29 +617,42 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
       size_t page_read_bytes = read_bytes < PGSIZE ? read_bytes : PGSIZE;
       size_t page_zero_bytes = PGSIZE - page_read_bytes;
 
-      /* Get a page of memory. */
-      uint8_t *kpage = palloc_get_page (PAL_USER);
-      if (kpage == NULL)
+      // /* Get a page of memory. */
+      // uint8_t *kpage = palloc_get_page (PAL_USER);
+      // if (kpage == NULL)
+      //   return false;
+
+      // /* Load this page. */
+      // if (file_read (file, kpage, page_read_bytes) != (int) page_read_bytes)
+      //   {
+      //     palloc_free_page (kpage);
+      //     return false; 
+      //   }
+      // memset (kpage + page_read_bytes, 0, page_zero_bytes);
+
+      // /* Add the page to the process's address space. */
+      // if (!install_page (upage, kpage, writable)) 
+      //   {
+      //     palloc_free_page (kpage);
+      //     return false; 
+      //   }
+
+      /* Initialize and set the vm_entry */
+      struct vm_entry* vm_entry = init_vm(upage, file,ofs,1,EXEC,0);
+      if(vm_entry == NULL)
         return false;
 
-      /* Load this page. */
-      if (file_read (file, kpage, page_read_bytes) != (int) page_read_bytes)
-        {
-          palloc_free_page (kpage);
-          return false; 
-        }
-      memset (kpage + page_read_bytes, 0, page_zero_bytes);
+      /* Add vm_entry to hash table by hash_insert() */
+      struct thread* cur = thread_current();
+      hash_insert(&cur->vm,&vm_entry->elem);
+      vm_entry->read_bytes = read_bytes;
+      vm_entry->zero_bytes = zero_bytes;
 
-      /* Add the page to the process's address space. */
-      if (!install_page (upage, kpage, writable)) 
-        {
-          palloc_free_page (kpage);
-          return false; 
-        }
 
       /* Advance. */
       read_bytes -= page_read_bytes;
       zero_bytes -= page_zero_bytes;
+      ofs += page_read_bytes;
       upage += PGSIZE;
     }
   return true;
@@ -646,7 +671,14 @@ setup_stack (void **esp)
     {
       success = install_page (((uint8_t *) PHYS_BASE) - PGSIZE, kpage, true);
       if (success)
+      {
         *esp = PHYS_BASE;
+        /* Add vm_entry of stack and add it to hash table */
+        struct vm_entry* v = init_vm(((uint8_t *) PHYS_BASE) - PGSIZE,NULL,0,1,ANONYMOUS,1);
+        struct thread* cur = thread_current();
+        hash_insert(&cur->vm,&v->elem);
+      }
+
       else
         palloc_free_page (kpage);
     }
@@ -662,7 +694,7 @@ setup_stack (void **esp)
    with palloc_get_page().
    Returns true on success, false if UPAGE is already mapped or
    if memory allocation fails. */
-static bool
+bool
 install_page (void *upage, void *kpage, bool writable)
 {
   struct thread *t = thread_current ();
@@ -671,4 +703,19 @@ install_page (void *upage, void *kpage, bool writable)
      address, then map our page there. */
   return (pagedir_get_page (t->pagedir, upage) == NULL
           && pagedir_set_page (t->pagedir, upage, kpage, writable));
+}
+
+/* Calculate where to put the vm_entry into the hash table */
+static unsigned vm_hash_func(const struct hash_elem *e, void *aux UNUSED)
+{
+  struct vm_entry *v = hash_entry(e,struct vm_entry,elem);
+  return v->vpn;
+}
+
+/* Compare address values of two entered hash_elem */
+static bool vm_less_func(const struct hash_elem *a, const struct hash_elem *b, void *aux UNUSED)
+{
+  struct vm_entry *v_a = hash_entry(a,struct vm_entry,elem);
+  struct vm_entry *v_b = hash_entry(b,struct vm_entry,elem);
+  return ((v_a->vpn)<(v_b->vpn)) ? true : false;
 }

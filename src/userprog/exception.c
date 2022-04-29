@@ -5,12 +5,18 @@
 #include "threads/interrupt.h"
 #include "threads/thread.h"
 #include "userprog/syscall.h"
+#include "../threads/vaddr.h"
+#include "../threads/palloc.h"
+#include "../userprog/process.h"
 
 /* Number of page faults processed. */
 static long long page_fault_cnt;
 
 static void kill (struct intr_frame *);
 static void page_fault (struct intr_frame *);
+
+/* New page fault handler */
+bool handle_mm_fault(struct vm_entry *vme);
 
 /* Registers handlers for interrupts that can be caused by user
    programs.
@@ -149,15 +155,72 @@ page_fault (struct intr_frame *f)
   write = (f->error_code & PF_W) != 0;
   user = (f->error_code & PF_U) != 0;
    
-  sys_exit(-1);
-  /* To implement virtual memory, delete the rest of the function
-     body, and replace it with code that brings in the page to
-     which fault_addr refers. */
-  printf ("Page fault at %p: %s error %s page in %s context.\n",
-          fault_addr,
-          not_present ? "not present" : "rights violation",
-          write ? "writing" : "reading",
-          user ? "user" : "kernel");
-  kill (f);
+//   sys_exit(-1);
+//   /* To implement virtual memory, delete the rest of the function
+//      body, and replace it with code that brings in the page to
+//      which fault_addr refers. */
+//   printf ("Page fault at %p: %s error %s page in %s context.\n",
+//           fault_addr,
+//           not_present ? "not present" : "rights violation",
+//           write ? "writing" : "reading",
+//           user ? "user" : "kernel");
+//   kill (f);
+   struct thread *cur = thread_current();
+   /* Implement actual page fault */
+   if(is_user_vaddr(fault_addr) && (user == true))
+   {
+      struct vm_entry *v = find_vme(fault_addr,&cur->vm);
+      if(v == NULL)
+         sys_exit(-1);
+      handle_mm_fault(v);
+   }
+   else if(is_kernel_vaddr(fault_addr) && (user == false))
+   {
+      struct vm_entry *v = find_vme(fault_addr,&cur->vm);
+      if(v == NULL)
+         sys_exit(-1);
+      handle_mm_fault(v);
+   }
+   /* invalid case */
+   else
+   {
+      /* Generate segmentation fault and kill(-1) */
+      sys_exit(-1);
+   }
+   /* Check the validity of vaddr */
+
 }
 
+bool handle_mm_fault(struct vm_entry *vme)
+{
+   struct file* file = vme->file;
+   size_t page_read_bytes = vme->read_bytes;
+   size_t page_zero_bytes = vme->zero_bytes;
+   void* upage = vme->page;
+   bool writable = (bool)vme->permission;
+   int ofs;
+   
+
+   /* Get a page of memory. */
+   uint8_t *kpage = palloc_get_page (PAL_USER);
+   if (kpage == NULL)
+      return false;
+
+   
+   /* Load this page. */
+   if ((ofs = file_read_at (file, kpage, page_read_bytes,vme->ofs)) != (int) page_read_bytes)
+      {
+         palloc_free_page (kpage); 
+         return false; 
+      }
+   vme->ofs += ofs;
+   memset (kpage + page_read_bytes, 0, page_zero_bytes);
+
+   /* Add the page to the process's address space. */
+   if (!install_page (upage, kpage, writable))
+      {
+         palloc_free_page (kpage);
+         return false; 
+      }
+   return true;
+}

@@ -6,6 +6,7 @@
 #include <stdint.h>
 #include "./synch.h"
 #include "../filesys/file.h"
+#include "../lib/kernel/hash.h"
 
 /* States in a thread's life cycle. */
 enum thread_status
@@ -95,6 +96,7 @@ struct thread
     /* Shared between thread.c and synch.c. */
     struct list_elem elem;              /* List element. */
 
+
 #ifdef USERPROG
     /* Owned by userprog/process.c. */
     uint32_t *pagedir;                  /* Page directory. */
@@ -131,12 +133,18 @@ struct thread
 
     /* Owned by thread.c. */
     unsigned magic;                     /* Detects stack overflow. */
+    
+    /* Virtual memory management */
+    struct hash vm;
   };
 
 /* If false (default), use round-robin scheduler.
    If true, use multi-level feedback queue scheduler.
    Controlled by kernel command-line option "-o mlfqs". */
 extern bool thread_mlfqs;
+
+/* List for physical page frame */
+struct list lru_list;
 
 /* Find thread */
 struct thread* find_thread(tid_t tid);

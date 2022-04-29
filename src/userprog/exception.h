@@ -7,8 +7,10 @@
 #define PF_U 0x4    /* 0: kernel, 1: user process. */
 
 #include "../lib/user/syscall.h"
+#include "../vm/page.h"
 
 void exception_init (void);
 void exception_print_stats (void);
+bool handle_mm_fault(struct vm_entry *vme);
 
 #endif /* userprog/exception.h */
