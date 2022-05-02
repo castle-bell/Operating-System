@@ -8,6 +8,7 @@
 #include "../threads/vaddr.h"
 #include "../threads/palloc.h"
 #include "../userprog/process.h"
+#include "../vm/swap.h"
 
 /* Number of page faults processed. */
 static long long page_fault_cnt;
@@ -170,14 +171,14 @@ page_fault (struct intr_frame *f)
    if(is_user_vaddr(fault_addr) && (user == true))
    {
       struct vm_entry *v = find_vme(fault_addr,&cur->vm);
-      if(v == NULL)
+      if(!check_valid_access(v,write))
          sys_exit(-1);
       handle_mm_fault(v);
    }
    else if(is_kernel_vaddr(fault_addr) && (user == false))
    {
       struct vm_entry *v = find_vme(fault_addr,&cur->vm);
-      if(v == NULL)
+      if(!check_valid_access(v,write))
          sys_exit(-1);
       handle_mm_fault(v);
    }
@@ -200,27 +201,48 @@ bool handle_mm_fault(struct vm_entry *vme)
    bool writable = (bool)vme->permission;
    int ofs;
    
-
    /* Get a page of memory. */
-   uint8_t *kpage = palloc_get_page (PAL_USER);
+   struct page* p = init_page(PAL_USER);
+   set_page(p,vme,thread_current());
+   uint8_t *kpage = p->kpage;
    if (kpage == NULL)
-      return false;
-
-   
-   /* Load this page. */
-   if ((ofs = file_read_at (file, kpage, page_read_bytes,vme->ofs)) != (int) page_read_bytes)
+   {
+      /* Implement the swap function */
+      swap();
+      p = init_page(PAL_USER);
+      set_page(p,vme,thread_current());
+      kpage = p->kpage;
+      if(kpage == NULL)
       {
-         palloc_free_page (kpage); 
-         return false; 
+         /* Terminate the OS */
       }
-   vme->ofs += ofs;
-   memset (kpage + page_read_bytes, 0, page_zero_bytes);
+   }
 
+   /* Case: EXEC, FILE */
+   if(vme->p_type != ANONYMOUS)
+   {
+      /* Load this page. */
+      if ((ofs = file_read_at (file, kpage, page_read_bytes,vme->ofs)) != (int) page_read_bytes)
+         {
+            palloc_free_page (kpage); 
+            return false; 
+         }
+      vme->ofs += ofs;
+      memset (kpage + page_read_bytes, 0, page_zero_bytes);
+   }
+   /* Case: ANONYMOUS */
+   else
+   {
+      /* Data is in disk */
+      if(vme->flag == 0)
+         swap_in(vme, kpage);
+   }
    /* Add the page to the process's address space. */
-   if (!install_page (upage, kpage, writable))
-      {
-         palloc_free_page (kpage);
-         return false; 
-      }
+   if (!install_page (upage, kpage, vme->permission))
+   {
+      palloc_free_page (kpage);
+      return false; 
+   }
    return true;
+   
 }

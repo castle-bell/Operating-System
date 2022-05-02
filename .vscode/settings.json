@@ -19,6 +19,23 @@
         "file.h": "c",
         "off_t.h": "c",
         "palloc.h": "c",
-        "vaddr.h": "c"
+        "vaddr.h": "c",
+        "array": "c",
+        "deque": "c",
+        "unordered_map": "c",
+        "vector": "c",
+        "memory": "c",
+        "optional": "c",
+        "string_view": "c",
+        "ostream": "c",
+        "sstream": "c",
+        "streambuf": "c",
+        "type_traits": "c",
+        "bitmap.h": "c",
+        "pagedir.h": "c",
+        "syscall-nr.h": "c",
+        "*.inc": "c",
+        "iosfwd": "c",
+        "limits": "c"
     }
 }

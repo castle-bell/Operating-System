@@ -332,7 +332,7 @@ process_exit (void)
          that's been freed (and cleared). */
       cur->pagedir = NULL;
       pagedir_activate (NULL);
-      pagedir_destroy (pd);
+      // pagedir_destroy (pd);
     }
 }
 
@@ -638,7 +638,7 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
       //   }
 
       /* Initialize and set the vm_entry */
-      struct vm_entry* vm_entry = init_vm(upage, file,ofs,1,EXEC,0);
+      struct vm_entry* vm_entry = init_vm(upage, file,ofs,writable,EXEC,1);
       if(vm_entry == NULL)
         return false;
 
@@ -666,7 +666,8 @@ setup_stack (void **esp)
   uint8_t *kpage;
   bool success = false;
 
-  kpage = palloc_get_page (PAL_USER | PAL_ZERO);
+  struct page* p = init_page(PAL_USER | PAL_ZERO);
+  kpage = p->kpage;
   if (kpage != NULL) 
     {
       success = install_page (((uint8_t *) PHYS_BASE) - PGSIZE, kpage, true);
@@ -677,10 +678,11 @@ setup_stack (void **esp)
         struct vm_entry* v = init_vm(((uint8_t *) PHYS_BASE) - PGSIZE,NULL,0,1,ANONYMOUS,1);
         struct thread* cur = thread_current();
         hash_insert(&cur->vm,&v->elem);
+        set_page(p,v,cur);
       }
 
       else
-        palloc_free_page (kpage);
+        release_page (kpage);
     }
   return success;
 }

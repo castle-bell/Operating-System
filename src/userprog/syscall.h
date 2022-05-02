@@ -27,6 +27,8 @@ void sys_close(int fd);
 void sys_sigaction(int signum, void (*handler) (void));
 void sys_sendsig(pid_t pid, int signum);
 void sched_yield();
+mapid_t sys_mmap (int fd, void *addr);
+void sys_munmap (mapid_t mapid);
 void get_argument(void *esp, int* argument, int count);
 
 #endif /* userprog/syscall.h */

@@ -7,6 +7,7 @@
 #include "./synch.h"
 #include "../filesys/file.h"
 #include "../lib/kernel/hash.h"
+#include "../lib/kernel/bitmap.h"
 
 /* States in a thread's life cycle. */
 enum thread_status
@@ -136,6 +137,9 @@ struct thread
     
     /* Virtual memory management */
     struct hash vm;
+
+    /* List of mmap */
+    struct list mmap_list;
   };
 
 /* If false (default), use round-robin scheduler.
@@ -145,6 +149,7 @@ extern bool thread_mlfqs;
 
 /* List for physical page frame */
 struct list lru_list;
+struct bitmap *swap_bitmap;
 
 /* Find thread */
 struct thread* find_thread(tid_t tid);

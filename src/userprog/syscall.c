@@ -9,6 +9,7 @@
 #include "../threads/vaddr.h"
 #include "userprog/pagedir.h"
 #include "../threads/palloc.h"
+#include "../vm/page.h"
 
 struct lock filesys_lock;
 
@@ -80,6 +81,8 @@ void sys_exit(int status)
   struct thread *cur = thread_current();
   /* First all child process stop until parent call wait */
   sema_down(&cur->wait_parent);
+  if(lock_held_by_current_thread(&filesys_lock))
+    lock_release(&filesys_lock);
 
   /* Save exit status at process descriptor*/
 
@@ -404,9 +407,87 @@ void sys_sendsig(pid_t pid, int signum)
   }
 }
 
-void sched_yield()
+mapid_t sys_mmap (int fd, void *addr)
 {
+  /* Check the validity of parameter */
+  if(fd == 0 || fd == 1)
+    return -1;
+  if(addr == NULL)
+    return -1;
+  if(((int)addr)%PGSIZE != 0)
+    return -1;
 
+  struct thread *cur = thread_current();
+  if(cur->fdt[fd] == NULL)
+    return -1;
+
+  struct file *file = file_reopen(cur->fdt[fd]);
+  if(file == NULL)
+    return -1;
+  
+  off_t file_size = file_length(file);
+  size_t page_read_bytes = file_size;
+  size_t page_zero_bytes = 0;
+  int page_num = file_size/PGSIZE;
+  /* Check size of file */
+  if(file_size == 0)
+    return -1;
+  /* Check the address is already in use */
+  for(int i = 0; i<page_num+1; i++)
+  {
+    if(find_vme(pg_no(addr+i*(PGSIZE)),&cur->vm) != NULL)
+    {
+      return -1;
+    }
+  }
+
+  struct mmap_file *mmap;
+  mmap = init_mmap_file(pg_no(addr),file);
+  for(int i = 0; i<page_num+1; i++)
+  {
+    struct vm_entry* vm_entry = init_vm(addr+i*(PGSIZE),file,0,1,FILE,1);
+    hash_insert(&cur->vm,&vm_entry->elem);
+    if(page_read_bytes > PGSIZE)
+    {
+      vm_entry->read_bytes = PGSIZE;
+      vm_entry->zero_bytes = 0;
+      page_read_bytes -= PGSIZE;
+    }
+    else
+    {
+      vm_entry->read_bytes = page_read_bytes;
+      vm_entry->zero_bytes = PGSIZE-page_read_bytes;
+    }
+    list_push_back(&mmap->vm_entry_list,&vm_entry->mmap_elem);
+    /* Allocate */
+    handle_mm_fault(vm_entry);
+  }
+  return (mapid_t)mmap->id;
+}
+
+void sys_munmap (mapid_t mapid)
+{
+  /* Reflect the change */
+  struct mmap_file *mmap;
+  struct thread *cur = thread_current();
+  struct list_elem *e = list_begin(&cur->mmap_list);
+  for(e; e!=list_end(&cur->mmap_list); e=list_next(e))
+  {
+    mmap = list_entry(e,struct mmap_file,elem);
+    if(mmap->id == mapid)
+      break;
+  }
+  if(e != list_end(&cur->mmap_list))
+  {
+    struct list_elem *v;
+    v = list_begin(&mmap->vm_entry_list);
+    for(v; v!=list_end(&mmap->vm_entry_list); v=list_next(v))
+    {
+      struct vm_entry *vm_entry = list_entry(v,struct vm_entry,mmap_elem);
+      swap_out(find_frame(vm_entry));
+    }
+    // release_mmap_file(mmap);
+  }
 }
 
 /* Check the stack is enougth to store in user address, and
@@ -528,6 +609,16 @@ syscall_handler (struct intr_frame *f)
     case SYS_YIELD:
       get_argument(esp,argument,0);
       thread_yield();
+      break;
+    
+    case SYS_MMAP:
+      get_argument(esp,argument,2);
+      f->eax = sys_mmap(argument[0],argument[1]);
+      break;
+
+    case SYS_MUNMAP:
+      get_argument(esp,argument,1);
+      sys_munmap(argument[0]);
       break;
 
     default:

@@ -11,6 +11,7 @@
 #include "threads/switch.h"
 #include "threads/synch.h"
 #include "threads/vaddr.h"
+#include "../vm/swap.h"
 #ifdef USERPROG
 #include "userprog/process.h"
 #endif
@@ -114,6 +115,8 @@ thread_init (void)
   lock_init (&tid_lock);
   list_init (&ready_list);
   list_init (&all_list);
+
+  /* Project 3 */
   list_init (&lru_list);
 
   /* Set up a thread structure for the running thread. */
@@ -525,6 +528,7 @@ init_thread (struct thread *t, const char *name, int priority)
     t->sig[i] = 0;
 
 #endif
+  list_init(&t->mmap_list);
   intr_set_level (old_level);
 }
 
