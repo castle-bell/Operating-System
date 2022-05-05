@@ -29,10 +29,11 @@ struct block
 struct bitmap* swap_init(void)
 {
     struct block *swap_partition = block_get_role(BLOCK_SWAP);
-    size_t num_bits = (swap_partition->size)/(SECTORS_IN_PAGE*BLOCK_SECTOR_SIZE);
+    size_t num_bits = (swap_partition->size)/(SECTORS_IN_PAGE);
     struct bitmap* bitmap = bitmap_create(num_bits);
     if(bitmap == NULL)
         printf("malloc failed\n");
+    lock_init(&swap_lock);
     return bitmap;
 }
 
@@ -41,15 +42,20 @@ bool write_partition(struct page* page, enum page_type type)
     if(type == EXEC || type == ANONYMOUS)
     {
         struct block *swap_p = block_get_role(BLOCK_SWAP);
-        size_t free_idx = bitmap_scan_and_flip(swap_bitmap,0,1,0);
-        if(free_idx = BITMAP_ERROR)
+        
+        /* Set lock */
+        lock_acquire(&swap_lock);
+        size_t free_idx = bitmap_scan_and_flip(swap_bitmap,0,1,false);
+        lock_release(&swap_lock);
+        
+        if(free_idx == BITMAP_ERROR)
         {
             printf("Full swap partition\n");
             return false;
         }
         block_sector_t st_start = SECTORS_IN_PAGE*free_idx;
         for(int i = 0;i<SECTORS_IN_PAGE;i++)
-            block_write(swap_p,st_start+i,page->vm_entry->page+i*BLOCK_SECTOR_SIZE);
+            block_write(swap_p,st_start+i,page->kpage+i*BLOCK_SECTOR_SIZE);
         page->vm_entry->flag = 0;
         page->vm_entry->swap_slot = free_idx;
     }
@@ -62,6 +68,9 @@ bool write_partition(struct page* page, enum page_type type)
         /* Set the origin position */
         file_seek(vm_entry->file,pos);
     }
+
+    /* Set page is not dirty */
+    pagedir_set_dirty(page->caller->pagedir, page->vm_entry->page, false);
     return true;
 }
 
@@ -71,15 +80,19 @@ bool swap(void)
     if(swap_bitmap == NULL)
         swap_bitmap = swap_init();
     struct page* victim = select_victim();
+    // printf("victim: %p, frame: %p\n",victim->vm_entry->page,victim->kpage);
     return swap_out(victim);
 }
 
 bool swap_out(struct page* victim)
 {
+    if(victim == NULL)
+        return false;
+
     /* Check the victim's dirty bit */
     struct vm_entry* v = victim->vm_entry;
-    struct thread* cur = thread_current();
-    bool dirty = pagedir_is_dirty(cur->pagedir, v->page);
+    struct thread* use = victim->caller;
+    bool dirty = pagedir_is_dirty(use->pagedir, v->page);
 
     switch(victim->vm_entry->p_type)
     {
@@ -87,8 +100,8 @@ bool swap_out(struct page* victim)
             if(dirty == true)
             {
                 write_partition(victim,EXEC);
+                victim->vm_entry->p_type = ANONYMOUS;
                 release_page(victim);
-
             }
             else
                 release_page(victim);
@@ -103,14 +116,8 @@ bool swap_out(struct page* victim)
                 release_page(victim);
             break;
         case ANONYMOUS:
-            if(dirty == true)
-            {
-                write_partition(victim,ANONYMOUS);
-                release_page(victim);
-
-            }
-            else
-                release_page(victim);
+            write_partition(victim,ANONYMOUS);
+            release_page(victim);
             break;
         default:
             printf("Impossible case\n");

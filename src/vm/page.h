@@ -78,9 +78,14 @@ void release_page(struct page* page_frame);
 bool get_accessed_bit(struct list_elem* e);
 void set_accessed_bit(struct list_elem* e, bool accessed);
 
+struct page* select_victim(void);
+
 bool write_partition(struct page* page, enum page_type type);
 
 struct mmap_file *init_mmap_file(mapid_t id, struct file *file);
 void release_mmap_file(struct mmap_file* mmap);
+
+bool verify_stack(void* esp, void* fault_addr);
+struct vm_entry* expand_stack(void* fault_addr);
 
 #endif /* vm/page.h */

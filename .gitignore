@@ -1,2 +1,3 @@
 src/threads/build/tests/
 src/tests/threads
+src/utils/pintos

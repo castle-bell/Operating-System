@@ -194,8 +194,9 @@ start_process (void *file_name_)
   /* Store running file */
   struct thread* cur = thread_current();
 
-  /* Initialize hash table */
+  /* Init the hash table */
   hash_init(&cur->vm,vm_hash_func,vm_less_func,NULL);
+  cur->is_loaded = true;
 
   /* Parsing the file_name */
   char *argument[64];
@@ -315,8 +316,11 @@ process_exit (void)
   }
 
   /* Delete vm_entry and hash_table */
-  hash_destroy(&cur->vm,NULL);
-  /* 나중에 vm_entry 삭제하는 것도 넣기 */
+  if(cur->is_loaded == true)
+  {
+    hash_destroy(&cur->vm,NULL);
+    remove_lru_elem();
+  }
 
   /* Destroy the current process's page directory and switch back
      to the kernel-only page directory. */
@@ -332,7 +336,7 @@ process_exit (void)
          that's been freed (and cleared). */
       cur->pagedir = NULL;
       pagedir_activate (NULL);
-      // pagedir_destroy (pd);
+      pagedir_destroy (pd);
     }
 }
 
@@ -617,26 +621,6 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
       size_t page_read_bytes = read_bytes < PGSIZE ? read_bytes : PGSIZE;
       size_t page_zero_bytes = PGSIZE - page_read_bytes;
 
-      // /* Get a page of memory. */
-      // uint8_t *kpage = palloc_get_page (PAL_USER);
-      // if (kpage == NULL)
-      //   return false;
-
-      // /* Load this page. */
-      // if (file_read (file, kpage, page_read_bytes) != (int) page_read_bytes)
-      //   {
-      //     palloc_free_page (kpage);
-      //     return false; 
-      //   }
-      // memset (kpage + page_read_bytes, 0, page_zero_bytes);
-
-      // /* Add the page to the process's address space. */
-      // if (!install_page (upage, kpage, writable)) 
-      //   {
-      //     palloc_free_page (kpage);
-      //     return false; 
-      //   }
-
       /* Initialize and set the vm_entry */
       struct vm_entry* vm_entry = init_vm(upage, file,ofs,writable,EXEC,1);
       if(vm_entry == NULL)
@@ -645,9 +629,11 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
       /* Add vm_entry to hash table by hash_insert() */
       struct thread* cur = thread_current();
       hash_insert(&cur->vm,&vm_entry->elem);
-      vm_entry->read_bytes = read_bytes;
-      vm_entry->zero_bytes = zero_bytes;
+      vm_entry->read_bytes = page_read_bytes;
+      vm_entry->zero_bytes = page_zero_bytes;
 
+      // printf("page: %p, permission: %d, p_type: %d, read: %d, zero: %d, flag: %d\n",
+      //     vm_entry->page, vm_entry->permission, vm_entry->p_type, vm_entry->read_bytes, vm_entry->zero_bytes, vm_entry->flag);
 
       /* Advance. */
       read_bytes -= page_read_bytes;
@@ -682,7 +668,7 @@ setup_stack (void **esp)
       }
 
       else
-        release_page (kpage);
+        palloc_free_page (kpage);
     }
   return success;
 }

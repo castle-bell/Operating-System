@@ -8,6 +8,7 @@
 #include "./process.h"
 #include "../threads/vaddr.h"
 #include "userprog/pagedir.h"
+#include "userprog/exception.h"
 #include "../threads/palloc.h"
 #include "../vm/page.h"
 
@@ -26,18 +27,19 @@ bool check_esp_validity(void *esp)
     return false;
   if(esp < (void *) 0x08048000)
     return false;
-
-  /* Check esp points the mapped region to get int(check 4 bytes)*/
-  for(int i = 0; i<4; i++)
-  {
-    if(pagedir_get_page(thread_current()->pagedir,esp+i) == NULL)
-      return false;
-  }
+  
+  // Project 2
+  // /* Check esp points the mapped region to get int(check 4 bytes)*/
+  // for(int i = 0; i<4; i++)
+  // {
+  //   if(pagedir_get_page(thread_current()->pagedir,esp+i) == NULL)
+  //     return false;
+  // }
   return true;
 }
 
 /* check arg(pointer) validity */
-bool check_arg_validity(void *arg, int n)
+bool check_arg_validity(void *arg, int n UNUSED)
 { 
   /* Check pointer is not null and point mapped region */
   /* Check the pointer is null pointe */
@@ -53,19 +55,40 @@ bool check_arg_validity(void *arg, int n)
   if(arg < (void *) 0x08048000)
     return false;
 
-  /* Check the n element of arg is mapped to phys_mem */
-  struct thread *cur = thread_current();
-  void * page;
-  char * array = (char *)arg;
+  /* Check the virtual address of arg */
+  struct thread* cur = thread_current();
+  if(!find_vme(arg,&cur->vm))
+    return false;
+  return true;
 
-  int i;
-  for(i = 0; i<n; i++)
-  {
-    if((page = pagedir_get_page(cur->pagedir,arg+i)) == NULL)
-      return false;
+  // Project 2
+  /* Check the n element of arg is mapped to phys_mem */
+  // struct thread *cur = thread_current();
+  // void * page;
+  // char * array = (char *)arg;
+
+  // int i;
+  // for(i = 0; i<n; i++)
+  // {
+  //   if((page = pagedir_get_page(cur->pagedir,arg+i)) == NULL)
+  //     return false;
     
-    if(array[i] == '\0')
-      break;
+  //   if(array[i] == '\0')
+  //     break;
+  // }
+}
+
+bool check_buffer_validity(void *buffer, unsigned size, bool write)
+{
+  struct thread* cur = thread_current();
+  int pg_no = size/PGSIZE;
+  for(int i=0; i<pg_no+1; i++)
+  {
+    struct vm_entry* v = find_vme(buffer+i*PGSIZE, &cur->vm);
+    if(v == NULL)
+      return false;
+    if(write && (v->permission == 0))
+      return false;
   }
   return true;
 }
@@ -83,6 +106,10 @@ void sys_exit(int status)
   sema_down(&cur->wait_parent);
   if(lock_held_by_current_thread(&filesys_lock))
     lock_release(&filesys_lock);
+  if(lock_held_by_current_thread(&frame_lock))
+    lock_release(&frame_lock);
+  if(lock_held_by_current_thread(&swap_lock))
+    lock_release(&swap_lock);
 
   /* Save exit status at process descriptor*/
 
@@ -103,7 +130,7 @@ void sys_exit(int status)
 
 pid_t sys_exec(const char *cmd_line)
 {
-  if(!check_arg_validity((void *)cmd_line,4000))
+  if(!check_buffer_validity((void *)cmd_line,4000,false))
   {
     sys_exit(-1);
   }
@@ -123,7 +150,7 @@ bool sys_create(const char *file, unsigned initial_size)
 {
 
   bool create;
-  if(!check_arg_validity((void *)file,20))
+  if(!check_buffer_validity((void *)file,20,false))
   {
     sys_exit(-1);
   }
@@ -143,7 +170,7 @@ bool sys_create(const char *file, unsigned initial_size)
 bool sys_remove(const char *file)
 {
   bool remove;
-  if(!check_arg_validity((void *)file,20))
+  if(!check_buffer_validity((void *)file,20,false))
   {
     sys_exit(-1);
   }
@@ -155,7 +182,7 @@ bool sys_remove(const char *file)
 
 int sys_open(const char *file)
 {
-  if(!check_arg_validity((void *)file,20))
+  if(!check_buffer_validity((void *)file,20,false))
   {
     sys_exit(-1);
   }
@@ -212,7 +239,7 @@ int sys_filesize(int fd)
 int sys_read(int fd, void *buffer, unsigned size)
 {
   lock_acquire(&filesys_lock);
-  if(!check_arg_validity(buffer, size+2))
+  if(!check_buffer_validity(buffer, size, true))
   {
     lock_release(&filesys_lock);
     sys_exit(-1);
@@ -259,7 +286,7 @@ int sys_read(int fd, void *buffer, unsigned size)
 int sys_write(int fd, const void *buffer, unsigned size)
 {
   lock_acquire(&filesys_lock);
-  if(!check_arg_validity(buffer, size+2))
+  if(!check_buffer_validity(buffer, size, false))
   {
     lock_release(&filesys_lock);
     sys_exit(-1);
@@ -427,7 +454,6 @@ mapid_t sys_mmap (int fd, void *addr)
   
   off_t file_size = file_length(file);
   size_t page_read_bytes = file_size;
-  size_t page_zero_bytes = 0;
   int page_num = file_size/PGSIZE;
   /* Check size of file */
   if(file_size == 0)
@@ -435,10 +461,8 @@ mapid_t sys_mmap (int fd, void *addr)
   /* Check the address is already in use */
   for(int i = 0; i<page_num+1; i++)
   {
-    if(find_vme(pg_no(addr+i*(PGSIZE)),&cur->vm) != NULL)
-    {
+    if(find_vme(addr+i*(PGSIZE),&cur->vm) != NULL)
       return -1;
-    }
   }
 
   struct mmap_file *mmap;
@@ -486,7 +510,7 @@ void sys_munmap (mapid_t mapid)
       struct vm_entry *vm_entry = list_entry(v,struct vm_entry,mmap_elem);
       swap_out(find_frame(vm_entry));
     }
-    // release_mmap_file(mmap);
+    release_mmap_file(mmap);
   }
 }
 
@@ -625,6 +649,8 @@ syscall_handler (struct intr_frame *f)
       sys_exit(-1);
   }
   
+  if(argument_number == SYS_SENDSIG || argument_number == SYS_SIGACTION)
+    return;
   /* 나중에 race condition도 생각하기 */
   /* 핸들러는 만들었는데 나중에 생성되는 경우 시그널이 무시될 수 있음 */
   /* Check if there is any signal comes to process */

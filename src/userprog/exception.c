@@ -167,20 +167,38 @@ page_fault (struct intr_frame *f)
 //           user ? "user" : "kernel");
 //   kill (f);
    struct thread *cur = thread_current();
+   /* Check the stack expansion */
+   // if(not_present)
+   // {
+   //    /* Check whether the addr is in range of (stack_bottom, stack_top+32) */
+   //    if(verify_stack(f->esp,fault_addr))
+   //    {
+   //       handle_mm_fault(expand_stack(fault_addr));
+   //       return;
+   //    }
+   // }
+   // printf("fault: %p\n",fault_addr);
    /* Implement actual page fault */
-   if(is_user_vaddr(fault_addr) && (user == true))
+   if(is_user_vaddr(fault_addr))
    {
       struct vm_entry *v = find_vme(fault_addr,&cur->vm);
       if(!check_valid_access(v,write))
          sys_exit(-1);
-      handle_mm_fault(v);
+      if(!handle_mm_fault(v))
+      {
+         printf("handler fault\n");
+         sys_exit(-1);
+      }
    }
    else if(is_kernel_vaddr(fault_addr) && (user == false))
    {
-      struct vm_entry *v = find_vme(fault_addr,&cur->vm);
-      if(!check_valid_access(v,write))
-         sys_exit(-1);
-      handle_mm_fault(v);
+      // struct vm_entry *v = find_vme(fault_addr,&cur->vm);
+      // if(!check_valid_access(v,write))
+      // {
+         // sys_exit(-1);
+      // }
+      // handle_mm_fault(v);
+      kill(f);
    }
    /* invalid case */
    else
@@ -194,29 +212,33 @@ page_fault (struct intr_frame *f)
 
 bool handle_mm_fault(struct vm_entry *vme)
 {
+   /* Check */
+   if(vme == NULL)
+      return false;
+
    struct file* file = vme->file;
    size_t page_read_bytes = vme->read_bytes;
    size_t page_zero_bytes = vme->zero_bytes;
    void* upage = vme->page;
    bool writable = (bool)vme->permission;
    int ofs;
-   
+   enum palloc_flags p_flag;
+   /* Set flag */
+   if(vme->p_type == ANONYMOUS)
+      p_flag = PAL_USER | PAL_ZERO;
+   else
+      p_flag = PAL_USER;
+
    /* Get a page of memory. */
-   struct page* p = init_page(PAL_USER);
-   set_page(p,vme,thread_current());
-   uint8_t *kpage = p->kpage;
-   if (kpage == NULL)
+   struct page* p = init_page(p_flag);
+   while(p  == NULL)
    {
       /* Implement the swap function */
       swap();
-      p = init_page(PAL_USER);
-      set_page(p,vme,thread_current());
-      kpage = p->kpage;
-      if(kpage == NULL)
-      {
-         /* Terminate the OS */
-      }
+      p = init_page(p_flag | PAL_ZERO);
    }
+   set_page(p,vme,thread_current());
+   uint8_t *kpage = p->kpage;
 
    /* Case: EXEC, FILE */
    if(vme->p_type != ANONYMOUS)
@@ -227,7 +249,6 @@ bool handle_mm_fault(struct vm_entry *vme)
             palloc_free_page (kpage); 
             return false; 
          }
-      vme->ofs += ofs;
       memset (kpage + page_read_bytes, 0, page_zero_bytes);
    }
    /* Case: ANONYMOUS */

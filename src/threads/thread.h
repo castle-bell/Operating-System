@@ -138,6 +138,8 @@ struct thread
     /* Virtual memory management */
     struct hash vm;
 
+    bool is_loaded;
+
     /* List of mmap */
     struct list mmap_list;
   };
@@ -149,7 +151,10 @@ extern bool thread_mlfqs;
 
 /* List for physical page frame */
 struct list lru_list;
+struct list_elem* clock;
 struct bitmap *swap_bitmap;
+struct lock frame_lock;
+struct lock swap_lock;
 
 /* Find thread */
 struct thread* find_thread(tid_t tid);

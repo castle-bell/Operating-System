@@ -118,6 +118,8 @@ thread_init (void)
 
   /* Project 3 */
   list_init (&lru_list);
+  lock_init (&frame_lock);
+  clock = NULL;
 
   /* Set up a thread structure for the running thread. */
   initial_thread = running_thread ();
@@ -528,6 +530,7 @@ init_thread (struct thread *t, const char *name, int priority)
     t->sig[i] = 0;
 
 #endif
+  t->is_loaded = false;
   list_init(&t->mmap_list);
   intr_set_level (old_level);
 }

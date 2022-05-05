@@ -36,6 +36,7 @@
         "syscall-nr.h": "c",
         "*.inc": "c",
         "iosfwd": "c",
-        "limits": "c"
+        "limits": "c",
+        "cstdlib": "c"
     }
 }
