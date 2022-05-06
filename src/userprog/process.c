@@ -195,7 +195,11 @@ start_process (void *file_name_)
   struct thread* cur = thread_current();
 
   /* Init the hash table */
-  hash_init(&cur->vm,vm_hash_func,vm_less_func,NULL);
+  if(!hash_init(&cur->vm,vm_hash_func,vm_less_func,NULL))
+  {
+    printf("Hash table alloc failed\n");
+    sys_exit(-1);
+  }
   cur->is_loaded = true;
 
   /* Parsing the file_name */
@@ -318,8 +322,8 @@ process_exit (void)
   /* Delete vm_entry and hash_table */
   if(cur->is_loaded == true)
   {
-    hash_destroy(&cur->vm,NULL);
     remove_lru_elem();
+    hash_destroy(&cur->vm,NULL);
   }
 
   /* Destroy the current process's page directory and switch back
@@ -336,7 +340,7 @@ process_exit (void)
          that's been freed (and cleared). */
       cur->pagedir = NULL;
       pagedir_activate (NULL);
-      pagedir_destroy (pd);
+      // pagedir_destroy (pd);
     }
 }
 
@@ -628,7 +632,11 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
 
       /* Add vm_entry to hash table by hash_insert() */
       struct thread* cur = thread_current();
-      hash_insert(&cur->vm,&vm_entry->elem);
+      if(hash_insert(&cur->vm,&vm_entry->elem) != NULL)
+      {
+        // printf("Already exist vm_entry\n");
+        return false;
+      }
       vm_entry->read_bytes = page_read_bytes;
       vm_entry->zero_bytes = page_zero_bytes;
 
@@ -653,22 +661,32 @@ setup_stack (void **esp)
   bool success = false;
 
   struct page* p = init_page(PAL_USER | PAL_ZERO);
-  kpage = p->kpage;
-  if (kpage != NULL) 
+  while(p  == NULL)
+   {
+      swap();
+      p = init_page(PAL_USER | PAL_ZERO);
+   }
+  if (p != NULL) 
     {
+      kpage = p->kpage;
       success = install_page (((uint8_t *) PHYS_BASE) - PGSIZE, kpage, true);
       if (success)
       {
         *esp = PHYS_BASE;
         /* Add vm_entry of stack and add it to hash table */
         struct vm_entry* v = init_vm(((uint8_t *) PHYS_BASE) - PGSIZE,NULL,0,1,ANONYMOUS,1);
+        if(v == NULL)
+        {
+          // printf("Alloc vm_entry failed\n");
+          return false;
+        }
         struct thread* cur = thread_current();
         hash_insert(&cur->vm,&v->elem);
         set_page(p,v,cur);
       }
 
       else
-        palloc_free_page (kpage);
+        release_page(p);
     }
   return success;
 }

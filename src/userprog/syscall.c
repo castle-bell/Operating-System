@@ -100,16 +100,17 @@ void sys_halt(void)
 
 void sys_exit(int status)
 {
-  
-  struct thread *cur = thread_current();
-  /* First all child process stop until parent call wait */
-  sema_down(&cur->wait_parent);
   if(lock_held_by_current_thread(&filesys_lock))
     lock_release(&filesys_lock);
   if(lock_held_by_current_thread(&frame_lock))
     lock_release(&frame_lock);
   if(lock_held_by_current_thread(&swap_lock))
     lock_release(&swap_lock);
+  
+  struct thread *cur = thread_current();
+
+  /* First all child process stop until parent call wait */
+  sema_down(&cur->wait_parent);
 
   /* Save exit status at process descriptor*/
 

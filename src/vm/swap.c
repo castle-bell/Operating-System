@@ -29,10 +29,13 @@ struct block
 struct bitmap* swap_init(void)
 {
     struct block *swap_partition = block_get_role(BLOCK_SWAP);
+    if(swap_partition == NULL)
+        sys_exit(-1);
     size_t num_bits = (swap_partition->size)/(SECTORS_IN_PAGE);
+
     struct bitmap* bitmap = bitmap_create(num_bits);
     if(bitmap == NULL)
-        printf("malloc failed\n");
+        sys_exit(-1);
     lock_init(&swap_lock);
     return bitmap;
 }
@@ -77,11 +80,24 @@ bool write_partition(struct page* page, enum page_type type)
 
 bool swap(void)
 {
+    if(!lock_held_by_current_thread(&frame_lock))
+        lock_acquire(&frame_lock);
     if(swap_bitmap == NULL)
         swap_bitmap = swap_init();
     struct page* victim = select_victim();
     // printf("victim: %p, frame: %p\n",victim->vm_entry->page,victim->kpage);
-    return swap_out(victim);
+    if(victim == NULL)
+    {
+        printf("victim is null\n");
+        if(lock_held_by_current_thread(&frame_lock))
+            lock_release(&frame_lock);
+        sys_exit(-1);
+    }
+
+    bool status = swap_out(victim);
+    if(lock_held_by_current_thread(&frame_lock))
+        lock_release(&frame_lock);
+    return status;
 }
 
 bool swap_out(struct page* victim)

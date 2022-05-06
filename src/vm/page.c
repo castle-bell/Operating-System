@@ -61,19 +61,23 @@ bool check_valid_access(struct vm_entry *v, bool write)
 /* Functions for struct page */
 struct page* init_page(enum palloc_flags flags)
 {
-    lock_acquire(&frame_lock);
+    if(!lock_held_by_current_thread(&frame_lock))
+        lock_acquire(&frame_lock);
     uint8_t *kpage;
     kpage = palloc_get_page (flags);
     if(kpage == NULL)
     {
-        lock_release(&frame_lock);
+        if(lock_held_by_current_thread(&frame_lock))
+            lock_release(&frame_lock);
         return NULL;
     }
 
     struct page* p = (struct page*)malloc(sizeof(struct page));
     if(p == NULL)
     {
-        lock_release(&frame_lock);
+        palloc_free_page(kpage);
+        if(lock_held_by_current_thread(&frame_lock))
+            lock_release(&frame_lock);
         return NULL;
     }
     p->fpn = pg_no(kpage);
@@ -81,13 +85,15 @@ struct page* init_page(enum palloc_flags flags)
     p->caller = NULL;
     p->vm_entry = NULL;
     list_push_back(&lru_list,&p->elem);
-    lock_release(&frame_lock);
+    if(lock_held_by_current_thread(&frame_lock))
+        lock_release(&frame_lock);
     return p;
 }
 
 struct page* find_frame(struct vm_entry* vm_entry)
 {
-    lock_acquire(&frame_lock);
+    if(!lock_held_by_current_thread(&frame_lock))
+        lock_acquire(&frame_lock);
     struct thread* cur = thread_current();
     struct page* page;
     uintptr_t fpn = pg_no(pagedir_get_page(cur->pagedir,vm_entry->page));
@@ -103,32 +109,50 @@ struct page* find_frame(struct vm_entry* vm_entry)
         lock_release(&frame_lock);
         return NULL;
     }
-    lock_release(&frame_lock);
+    if(lock_held_by_current_thread(&frame_lock))
+        lock_release(&frame_lock);
     return page;
 }
 
 void set_page(struct page* page_frame, struct vm_entry* vm_entry, struct thread* caller)
 {
-    lock_acquire(&frame_lock);
+    if(!lock_held_by_current_thread(&frame_lock))
+        lock_acquire(&frame_lock);
     page_frame->vm_entry = vm_entry;
     page_frame->caller = caller;
-    lock_release(&frame_lock);
+    if(lock_held_by_current_thread(&frame_lock))
+        lock_release(&frame_lock);
 }
 
 void release_page(struct page* page_frame)
 {
     /* Remove from PTE */
-    lock_acquire(&frame_lock);
-    pagedir_clear_page(page_frame->caller->pagedir, page_frame->vm_entry->page);
+    if(!lock_held_by_current_thread(&frame_lock))
+        lock_acquire(&frame_lock);
+    if(page_frame == NULL)
+    {
+        if(lock_held_by_current_thread(&frame_lock))
+            lock_release(&frame_lock);
+        return;
+    }
+
+    void* kpage = page_frame->kpage;
+
+    /* Check whether install_page succeed */
+    if((page_frame->caller != NULL) && (page_frame->vm_entry != NULL))
+        pagedir_clear_page(page_frame->caller->pagedir, page_frame->vm_entry->page);
 
     list_remove(&page_frame->elem);
 
-    /* Free the kpage(코드 보니까 위에도 여기에 포함 되는 것 같음) */
-    palloc_free_page(page_frame->kpage);
+    page_frame->kpage = NULL;
+    palloc_free_page(kpage);
+    page_frame->vm_entry = NULL;
+    page_frame->caller = NULL;
 
     /* Remove from lru_list */
     free(page_frame);
-    lock_release(&frame_lock);
+    if(lock_held_by_current_thread(&frame_lock))
+        lock_release(&frame_lock);
 }
 
 void release_vm_entry(struct vm_entry* vm_entry)
@@ -154,7 +178,9 @@ void remove_lru_elem(void)
         struct page* p = list_entry(e,struct page,elem);
         if((p->caller == thread_current()))
         {
+            struct vm_entry* v = p->vm_entry;
             release_page(p);
+            release_vm_entry(v);
         }
         e = n;
     }
@@ -195,13 +221,11 @@ static struct list_elem* get_next_clock(void)
 /* Select victim page using clock algorithm from page directory */
 struct page* select_victim(void)
 {
-    lock_acquire(&frame_lock);
     struct list_elem *point;
     point = get_clock();
     if(point == NULL)
     {
         printf("impossible case\n");
-        lock_release(&frame_lock);
         return NULL;
     }
     while(!get_accessed_bit(point))
@@ -214,7 +238,6 @@ struct page* select_victim(void)
     
     /* Selected victim */
     struct page* p = list_entry(point,struct page,elem);
-    lock_release(&frame_lock);
     return p;
 }
 

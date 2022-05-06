@@ -179,7 +179,7 @@ page_fault (struct intr_frame *f)
    // }
    // printf("fault: %p\n",fault_addr);
    /* Implement actual page fault */
-   if(is_user_vaddr(fault_addr))
+   if(is_user_vaddr(fault_addr) && not_present)
    {
       struct vm_entry *v = find_vme(fault_addr,&cur->vm);
       if(!check_valid_access(v,write))
@@ -198,6 +198,7 @@ page_fault (struct intr_frame *f)
          // sys_exit(-1);
       // }
       // handle_mm_fault(v);
+      printf("not present: %d\n", not_present);
       kill(f);
    }
    /* invalid case */
