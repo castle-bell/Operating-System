@@ -321,10 +321,7 @@ process_exit (void)
 
   /* Delete vm_entry and hash_table */
   if(cur->is_loaded == true)
-  {
-    remove_lru_elem();
-    hash_destroy(&cur->vm,NULL);
-  }
+    remove_vm_entry();
 
   /* Destroy the current process's page directory and switch back
      to the kernel-only page directory. */
@@ -340,7 +337,7 @@ process_exit (void)
          that's been freed (and cleared). */
       cur->pagedir = NULL;
       pagedir_activate (NULL);
-      // pagedir_destroy (pd);
+      pagedir_destroy (pd);
     }
 }
 
@@ -686,7 +683,11 @@ setup_stack (void **esp)
       }
 
       else
+      {
+        lock_acquire(&frame_lock);
         release_page(p);
+        lock_release(&frame_lock);
+      }
     }
   return success;
 }

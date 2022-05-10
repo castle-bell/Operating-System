@@ -7,11 +7,13 @@
 #include "../threads/thread.h"
 #include "../lib/user/syscall.h"
 
+#define CLOSE_ALL -1
+
 void syscall_init (void);
 
 bool check_esp_validity(void *esp);
 bool check_arg_validity(void *arg, int n);
-bool check_buffer_validity(void *buffer, unsigned size, bool write);
+bool check_buffer_validity(void *buffer, unsigned size, bool write, void* esp);
 void sys_halt(void);
 void sys_exit(int status);
 pid_t sys_exec(const char *cmd_line);

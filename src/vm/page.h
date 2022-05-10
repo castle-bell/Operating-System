@@ -7,6 +7,8 @@
 #include "../filesys/off_t.h"
 #include "../threads/palloc.h"
 
+#define MB 1024*1024
+
 /* Page type */
 enum page_type{
     EXEC,
@@ -74,6 +76,7 @@ struct page* find_frame(struct vm_entry* vm_entry);
 void set_page(struct page* page_frame, struct vm_entry* vm_entry, struct thread* caller);
 void release_page(struct page* page_frame);
 
+void remove_vm_entry(void);
 
 bool get_accessed_bit(struct list_elem* e);
 void set_accessed_bit(struct list_elem* e, bool accessed);
@@ -86,6 +89,6 @@ struct mmap_file *init_mmap_file(mapid_t id, struct file *file);
 void release_mmap_file(struct mmap_file* mmap);
 
 bool verify_stack(void* esp, void* fault_addr);
-struct vm_entry* expand_stack(void* fault_addr);
+bool expand_stack(void* fault_addr);
 
 #endif /* vm/page.h */

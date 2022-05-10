@@ -78,17 +78,29 @@ bool check_arg_validity(void *arg, int n UNUSED)
   // }
 }
 
-bool check_buffer_validity(void *buffer, unsigned size, bool write)
+bool check_buffer_validity(void *buffer, unsigned size, bool write, void* esp)
 {
   struct thread* cur = thread_current();
-  int pg_no = size/PGSIZE;
+  int pg_no = (pg_ofs(buffer)+size-1)/PGSIZE;
   for(int i=0; i<pg_no+1; i++)
   {
+    /* Check whether the addr is in range of (stack_bottom, stack_top+32) */
+      if(verify_stack(esp,buffer+i*PGSIZE))
+      {
+         if(!expand_stack(buffer+i*PGSIZE))
+         {
+            printf("Stack expansion failed\n");
+            sys_exit(-1);
+         }
+      }
+
     struct vm_entry* v = find_vme(buffer+i*PGSIZE, &cur->vm);
     if(v == NULL)
       return false;
     if(write && (v->permission == 0))
       return false;
+    if(find_frame(v) == NULL)
+      handle_mm_fault(v);
   }
   return true;
 }
@@ -111,8 +123,9 @@ void sys_exit(int status)
 
   /* First all child process stop until parent call wait */
   sema_down(&cur->wait_parent);
-
-  /* Save exit status at process descriptor*/
+  
+  /* Close all mmaped vm_entry */
+  sys_munmap(CLOSE_ALL);
 
   printf("%s: exit(%d)\n",cur->name,status);
   if(cur->is_parent_wait == true)
@@ -131,10 +144,6 @@ void sys_exit(int status)
 
 pid_t sys_exec(const char *cmd_line)
 {
-  if(!check_buffer_validity((void *)cmd_line,4000,false))
-  {
-    sys_exit(-1);
-  }
   lock_acquire(&filesys_lock);
   tid_t result;
   result = process_execute(cmd_line); 
@@ -151,10 +160,6 @@ bool sys_create(const char *file, unsigned initial_size)
 {
 
   bool create;
-  if(!check_buffer_validity((void *)file,20,false))
-  {
-    sys_exit(-1);
-  }
 
   lock_acquire(&filesys_lock);
   /* If file_name = [], then exit */
@@ -171,10 +176,6 @@ bool sys_create(const char *file, unsigned initial_size)
 bool sys_remove(const char *file)
 {
   bool remove;
-  if(!check_buffer_validity((void *)file,20,false))
-  {
-    sys_exit(-1);
-  }
   lock_acquire(&filesys_lock);
   remove = filesys_remove(file);
   lock_release(&filesys_lock);
@@ -183,11 +184,6 @@ bool sys_remove(const char *file)
 
 int sys_open(const char *file)
 {
-  if(!check_buffer_validity((void *)file,20,false))
-  {
-    sys_exit(-1);
-  }
-
   lock_acquire(&filesys_lock);
 
   struct file* open_file;
@@ -240,12 +236,6 @@ int sys_filesize(int fd)
 int sys_read(int fd, void *buffer, unsigned size)
 {
   lock_acquire(&filesys_lock);
-  if(!check_buffer_validity(buffer, size, true))
-  {
-    lock_release(&filesys_lock);
-    sys_exit(-1);
-  }
-
   /* Check range of fd */
   if(fd < 0 || fd > 127)
   {
@@ -266,7 +256,7 @@ int sys_read(int fd, void *buffer, unsigned size)
 
   if(fd == 1 || fd == 2)
   {
-    lock_release(&filesys_lock);
+    lock_release(&filesys_lock);;
     return -1;
   }
 
@@ -287,11 +277,6 @@ int sys_read(int fd, void *buffer, unsigned size)
 int sys_write(int fd, const void *buffer, unsigned size)
 {
   lock_acquire(&filesys_lock);
-  if(!check_buffer_validity(buffer, size, false))
-  {
-    lock_release(&filesys_lock);
-    sys_exit(-1);
-  }
 
   /* Check range of fd */
   if(fd < 0 || fd > 127)
@@ -496,22 +481,29 @@ void sys_munmap (mapid_t mapid)
   struct mmap_file *mmap;
   struct thread *cur = thread_current();
   struct list_elem *e = list_begin(&cur->mmap_list);
-  for(e; e!=list_end(&cur->mmap_list); e=list_next(e))
+  while(e!=list_end(&cur->mmap_list))
   {
     mmap = list_entry(e,struct mmap_file,elem);
-    if(mmap->id == mapid)
-      break;
-  }
-  if(e != list_end(&cur->mmap_list))
-  {
-    struct list_elem *v;
-    v = list_begin(&mmap->vm_entry_list);
-    for(v; v!=list_end(&mmap->vm_entry_list); v=list_next(v))
+    if((mmap->id == mapid) || (mapid == CLOSE_ALL))
     {
-      struct vm_entry *vm_entry = list_entry(v,struct vm_entry,mmap_elem);
-      swap_out(find_frame(vm_entry));
+      if(e != list_end(&cur->mmap_list))
+      {
+        struct list_elem *v;
+        v = list_begin(&mmap->vm_entry_list);
+        for(v; v!=list_end(&mmap->vm_entry_list); v=list_next(v))
+        {
+          struct vm_entry *vm_entry = list_entry(v,struct vm_entry,mmap_elem);
+          lock_acquire(&frame_lock);
+          swap_out(find_frame(vm_entry));
+          lock_release(&frame_lock);
+        }
+        sys_close(mmap->file);
+        e = list_next(e);
+        release_mmap_file(mmap);
+      }
+      if(mapid != CLOSE_ALL)
+        break;
     }
-    release_mmap_file(mmap);
   }
 }
 
@@ -568,6 +560,8 @@ syscall_handler (struct intr_frame *f)
 
     case SYS_EXEC:
       get_argument(esp,argument,1);
+      if(!check_buffer_validity((void *)argument[0],0,false,f->esp))
+        sys_exit(-1);
       f->eax = sys_exec(argument[0]);
       break;
 
@@ -578,16 +572,22 @@ syscall_handler (struct intr_frame *f)
 
     case SYS_CREATE:
       get_argument(esp,argument,2);
+      if(!check_buffer_validity((void *)argument[0],0,false,f->esp))
+        sys_exit(-1);
       f->eax = sys_create(argument[0], argument[1]);
       break;
 
     case SYS_REMOVE:
       get_argument(esp,argument,1);
+      if(!check_buffer_validity((void *)argument[0],0,false,f->esp))
+        sys_exit(-1);
       f->eax = sys_remove(argument[0]);
       break;
 
     case SYS_OPEN:
       get_argument(esp,argument,1);
+      if(!check_buffer_validity((void *)argument[0],0,false,f->esp))
+        sys_exit(-1);
       f->eax = sys_open(argument[0]);
       break;
 
@@ -598,11 +598,15 @@ syscall_handler (struct intr_frame *f)
 
     case SYS_READ:
       get_argument(esp,argument,3);
+      if(!check_buffer_validity((void *)argument[1],argument[2],true,f->esp))
+        sys_exit(-1);
       f->eax = sys_read(argument[0], argument[1], argument[2]);
       break;
 
     case SYS_WRITE:
       get_argument(esp,argument,3);
+      if(!check_buffer_validity((void *)argument[1],argument[2],false,f->esp))
+        sys_exit(-1);
       f->eax = sys_write(argument[0],argument[1],argument[2]);
       break;
 

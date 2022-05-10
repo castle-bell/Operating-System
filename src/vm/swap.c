@@ -8,8 +8,6 @@
 #include "../threads/thread.h"
 #include "vm/swap.h"
 
-#define SECTORS_IN_PAGE 8
-
 /* A block device. */
 struct block
   {
@@ -46,7 +44,6 @@ bool write_partition(struct page* page, enum page_type type)
     {
         struct block *swap_p = block_get_role(BLOCK_SWAP);
         
-        /* Set lock */
         lock_acquire(&swap_lock);
         size_t free_idx = bitmap_scan_and_flip(swap_bitmap,0,1,false);
         lock_release(&swap_lock);
@@ -54,6 +51,7 @@ bool write_partition(struct page* page, enum page_type type)
         if(free_idx == BITMAP_ERROR)
         {
             printf("Full swap partition\n");
+            sys_exit(-1);
             return false;
         }
         block_sector_t st_start = SECTORS_IN_PAGE*free_idx;
@@ -80,8 +78,7 @@ bool write_partition(struct page* page, enum page_type type)
 
 bool swap(void)
 {
-    if(!lock_held_by_current_thread(&frame_lock))
-        lock_acquire(&frame_lock);
+    lock_acquire(&frame_lock);
     if(swap_bitmap == NULL)
         swap_bitmap = swap_init();
     struct page* victim = select_victim();
@@ -89,14 +86,12 @@ bool swap(void)
     if(victim == NULL)
     {
         printf("victim is null\n");
-        if(lock_held_by_current_thread(&frame_lock))
-            lock_release(&frame_lock);
+        lock_release(&frame_lock);
         sys_exit(-1);
     }
 
     bool status = swap_out(victim);
-    if(lock_held_by_current_thread(&frame_lock))
-        lock_release(&frame_lock);
+    lock_release(&frame_lock);
     return status;
 }
 
@@ -144,12 +139,15 @@ bool swap_out(struct page* victim)
 
 void swap_in(struct vm_entry *vm_entry, void *kpage)
 {
+    lock_acquire(&frame_lock);
     block_sector_t st = SECTORS_IN_PAGE*(vm_entry->swap_slot);
     struct block *swap_block = block_get_role(BLOCK_SWAP);
     for(int i = 0;i<SECTORS_IN_PAGE;i++)
         block_read(swap_block,st+i,kpage+i*BLOCK_SECTOR_SIZE);
     vm_entry->flag = 1;
+    lock_acquire(&swap_lock);
     bitmap_set(swap_bitmap,vm_entry->swap_slot,false);
+    lock_release(&swap_lock);
     vm_entry->swap_slot = -1;
 
     /* Set the swaped block to all 0 */
@@ -157,4 +155,5 @@ void swap_in(struct vm_entry *vm_entry, void *kpage)
     memset (zero, 0, BLOCK_SECTOR_SIZE);
     for(int j = 0;j<SECTORS_IN_PAGE;j++)
         block_write(swap_block,st+j,zero);
+    lock_release(&frame_lock);
 }

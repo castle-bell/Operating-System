@@ -167,20 +167,20 @@ page_fault (struct intr_frame *f)
 //           user ? "user" : "kernel");
 //   kill (f);
    struct thread *cur = thread_current();
-   /* Check the stack expansion */
-   // if(not_present)
-   // {
-   //    /* Check whether the addr is in range of (stack_bottom, stack_top+32) */
-   //    if(verify_stack(f->esp,fault_addr))
-   //    {
-   //       handle_mm_fault(expand_stack(fault_addr));
-   //       return;
-   //    }
-   // }
-   // printf("fault: %p\n",fault_addr);
+
    /* Implement actual page fault */
-   if(is_user_vaddr(fault_addr) && not_present)
+   if(not_present)
    {
+      /* Check whether the addr is in range of (stack_bottom, stack_top+32) */
+      if(verify_stack(f->esp,fault_addr))
+      {
+         if(!expand_stack(fault_addr))
+         {
+            printf("Stack expansion failed\n");
+            sys_exit(-1);
+         }
+      }
+      
       struct vm_entry *v = find_vme(fault_addr,&cur->vm);
       if(!check_valid_access(v,write))
          sys_exit(-1);
@@ -192,14 +192,8 @@ page_fault (struct intr_frame *f)
    }
    else if(is_kernel_vaddr(fault_addr) && (user == false))
    {
-      // struct vm_entry *v = find_vme(fault_addr,&cur->vm);
-      // if(!check_valid_access(v,write))
-      // {
-         // sys_exit(-1);
-      // }
-      // handle_mm_fault(v);
-      printf("not present: %d\n", not_present);
-      kill(f);
+      sys_exit(-1);
+      //kill(f)
    }
    /* invalid case */
    else
@@ -247,7 +241,9 @@ bool handle_mm_fault(struct vm_entry *vme)
       /* Load this page. */
       if ((ofs = file_read_at (file, kpage, page_read_bytes,vme->ofs)) != (int) page_read_bytes)
          {
-            palloc_free_page (kpage); 
+            lock_acquire(&frame_lock);
+            release_page(p);
+            lock_release(&frame_lock);
             return false; 
          }
       memset (kpage + page_read_bytes, 0, page_zero_bytes);
@@ -262,7 +258,9 @@ bool handle_mm_fault(struct vm_entry *vme)
    /* Add the page to the process's address space. */
    if (!install_page (upage, kpage, vme->permission))
    {
-      palloc_free_page (kpage);
+      lock_acquire(&frame_lock);
+      release_page(p);
+      lock_release(&frame_lock);
       return false; 
    }
    return true;

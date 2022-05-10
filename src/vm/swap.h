@@ -7,6 +7,8 @@
 #include "../threads/palloc.h"
 #include "vm/page.h"
 
+#define SECTORS_IN_PAGE 8
+
 struct bitmap* swap_init(void);
 bool write_partition(struct page* page, enum page_type type);
 bool swap(void);

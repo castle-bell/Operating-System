@@ -6,6 +6,7 @@
 #include "../threads/thread.h"
 #include "../userprog/pagedir.h"
 #include "../devices/block.h"
+#include "vm/swap.h"
 
 struct vm_entry *init_vm(void *upage, struct file* file, off_t ofs, 
     int permission, enum page_type ptype, int flag)
@@ -14,7 +15,7 @@ struct vm_entry *init_vm(void *upage, struct file* file, off_t ofs,
     if(v == NULL)
         return NULL;
     v->vpn = pg_no(upage);
-    v->page = upage;
+    v->page = pg_round_down(upage);
     v->permission = permission;
     v->p_type = ptype;
     v->file = file;
@@ -61,14 +62,12 @@ bool check_valid_access(struct vm_entry *v, bool write)
 /* Functions for struct page */
 struct page* init_page(enum palloc_flags flags)
 {
-    if(!lock_held_by_current_thread(&frame_lock))
-        lock_acquire(&frame_lock);
+    lock_acquire(&frame_lock);
     uint8_t *kpage;
     kpage = palloc_get_page (flags);
     if(kpage == NULL)
     {
-        if(lock_held_by_current_thread(&frame_lock))
-            lock_release(&frame_lock);
+        lock_release(&frame_lock);
         return NULL;
     }
 
@@ -76,8 +75,7 @@ struct page* init_page(enum palloc_flags flags)
     if(p == NULL)
     {
         palloc_free_page(kpage);
-        if(lock_held_by_current_thread(&frame_lock))
-            lock_release(&frame_lock);
+        lock_release(&frame_lock);
         return NULL;
     }
     p->fpn = pg_no(kpage);
@@ -85,15 +83,12 @@ struct page* init_page(enum palloc_flags flags)
     p->caller = NULL;
     p->vm_entry = NULL;
     list_push_back(&lru_list,&p->elem);
-    if(lock_held_by_current_thread(&frame_lock))
-        lock_release(&frame_lock);
+    lock_release(&frame_lock);
     return p;
 }
 
 struct page* find_frame(struct vm_entry* vm_entry)
 {
-    if(!lock_held_by_current_thread(&frame_lock))
-        lock_acquire(&frame_lock);
     struct thread* cur = thread_current();
     struct page* page;
     uintptr_t fpn = pg_no(pagedir_get_page(cur->pagedir,vm_entry->page));
@@ -105,42 +100,27 @@ struct page* find_frame(struct vm_entry* vm_entry)
             break;
     }
     if(e == list_end(&lru_list))
-    {
-        lock_release(&frame_lock);
         return NULL;
-    }
-    if(lock_held_by_current_thread(&frame_lock))
-        lock_release(&frame_lock);
     return page;
 }
 
 void set_page(struct page* page_frame, struct vm_entry* vm_entry, struct thread* caller)
 {
-    if(!lock_held_by_current_thread(&frame_lock))
-        lock_acquire(&frame_lock);
     page_frame->vm_entry = vm_entry;
     page_frame->caller = caller;
-    if(lock_held_by_current_thread(&frame_lock))
-        lock_release(&frame_lock);
 }
 
 void release_page(struct page* page_frame)
 {
     /* Remove from PTE */
-    if(!lock_held_by_current_thread(&frame_lock))
-        lock_acquire(&frame_lock);
     if(page_frame == NULL)
-    {
-        if(lock_held_by_current_thread(&frame_lock))
-            lock_release(&frame_lock);
         return;
-    }
 
     void* kpage = page_frame->kpage;
 
     /* Check whether install_page succeed */
-    if((page_frame->caller != NULL) && (page_frame->vm_entry != NULL))
-        pagedir_clear_page(page_frame->caller->pagedir, page_frame->vm_entry->page);
+    // if((page_frame->caller != NULL) && (page_frame->vm_entry != NULL))
+    pagedir_clear_page(page_frame->caller->pagedir, page_frame->vm_entry->page);
 
     list_remove(&page_frame->elem);
 
@@ -151,39 +131,65 @@ void release_page(struct page* page_frame)
 
     /* Remove from lru_list */
     free(page_frame);
-    if(lock_held_by_current_thread(&frame_lock))
-        lock_release(&frame_lock);
 }
 
 void release_vm_entry(struct vm_entry* vm_entry)
 {
+    lock_acquire(&frame_lock);
     struct page* page = find_frame(vm_entry);
     if(page != NULL)
     {
         release_page(page);
     }
+    else
+    {
+        if(vm_entry->swap_slot != -1)
+        {
+            block_sector_t st = SECTORS_IN_PAGE*(vm_entry->swap_slot);
+            struct block *swap_block = block_get_role(BLOCK_SWAP);
+            vm_entry->flag = 1;
+            lock_acquire(&swap_lock);
+            bitmap_set(swap_bitmap,vm_entry->swap_slot,false);
+            lock_release(&swap_lock);
+            vm_entry->swap_slot = -1;
+
+            /* Set the swaped block to all 0 */
+            char zero[BLOCK_SECTOR_SIZE];
+            memset (zero, 0, BLOCK_SECTOR_SIZE);
+            for(int j = 0;j<SECTORS_IN_PAGE;j++)
+                block_write(swap_block,st+j,zero);
+        }
+    }
+    lock_release(&frame_lock);
     vm_entry->page = NULL;
     vm_entry->file = NULL;
     hash_delete(&(thread_current()->vm),&vm_entry->elem);
     free(vm_entry);
 }
 
-void remove_lru_elem(void)
+static void vm_destructor(struct hash_elem* e, void* aux UNUSED)
 {
-    struct list_elem* e;
-    e = list_begin(&lru_list);
-    while(e != list_end(&lru_list))
-    {
-        struct list_elem* n = list_next(e);
-        struct page* p = list_entry(e,struct page,elem);
-        if((p->caller == thread_current()))
-        {
-            struct vm_entry* v = p->vm_entry;
-            release_page(p);
-            release_vm_entry(v);
-        }
-        e = n;
-    }
+    release_vm_entry(hash_entry(e,struct vm_entry,elem));
+}
+
+void remove_vm_entry(void)
+{
+    struct thread* cur = thread_current();
+    struct vm_entry* v;
+
+    // /* Release all vm_entry in hash table */
+    // struct hash_iterator i;
+    // struct hash_elem* p;
+    // hash_first (&i, &cur->vm);
+    // p = hash_next(&i);
+    // while (p)
+    // {
+    //     v = hash_entry (hash_cur (&i), struct vm_entry, elem);
+    //     p = hash_next(&i);
+    //     printf("v->page: %p\n",v->page);
+    //     // release_vm_entry(v);
+    // }
+    hash_destroy(&cur->vm,vm_destructor);
 }
 
 /* Get accessed bit from list_elem of lru_list */
@@ -268,21 +274,29 @@ void release_mmap_file(struct mmap_file* mmap)
 
 bool verify_stack(void* esp, void* fault_addr)
 {
-    if(fault_addr+32 < esp)
+    struct thread* cur = thread_current();
+    struct vm_entry *v = find_vme(fault_addr,&cur->vm);
+    if(v != NULL)
         return false;
-    return true;
+    
+    /* Check the validity of fault_addr */
+    if(!is_user_vaddr(esp) || !is_user_vaddr(fault_addr))
+        return false;
+    if(fault_addr < PHYS_BASE-8*MB)
+        return false;
+
+    if(fault_addr >= esp-32)
+        return true;
+    return false;
 }
 
-struct vm_entry* expand_stack(void* fault_addr)
+bool expand_stack(void* fault_addr)
 {
-    struct vm_entry* stack_vm;
-    void* next_page_addr;
     struct thread* cur = thread_current();
-
-    next_page_addr = find_vme((uint8_t*)fault_addr-PGSIZE, &cur->vm)->page + PGSIZE;
-    struct vm_entry* v = init_vm(next_page_addr,NULL,0,1,ANONYMOUS,1);
+    void* page_addr = pg_round_down(fault_addr);
+    struct vm_entry* v = init_vm(page_addr,NULL,0,1,ANONYMOUS,1);
     if(v == NULL)
-        return NULL;
+        return false;
     hash_insert(&cur->vm, &v->elem);
-    return v;
+    return true;
 }
