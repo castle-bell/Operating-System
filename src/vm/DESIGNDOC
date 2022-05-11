@@ -1,0 +1,345 @@
+       	       	    +---------------------------+
+		    |		CS 140		|
+		    | PROJECT 3: VIRTUAL MEMORY	|
+		    |	   DESIGN DOCUMENT	|
+		    +---------------------------+
+
+---- GROUP ----
+
+>> Fill in the names and email addresses of your group members.
+
+Seongjong Park <jilisalangx@kaist.ac.kr>
+
+---- PRELIMINARIES ----
+
+>> If you have any preliminary comments on your submission, notes for the
+>> TAs, or extra credit, please give them here.
+
+>> Please cite any offline or online sources you consulted while
+>> preparing your submission, other than the Pintos documentation, course
+>> text, lecture notes, and course staff.
+
+ - Lecture note and lecture video
+
+
+			PAGE TABLE MANAGEMENT
+			=====================
+
+---- DATA STRUCTURES ----
+
+>> A1: Copy here the declaration of each new or changed `struct' or
+>> `struct' member, global or static variable, `typedef', or
+>> enumeration.  Identify the purpose of each in 25 words or less.
+
+struct list lru_list;
+=> page frame table
+
+thread 구조체 내의 struct hash vm; member => virtual page table
+
+enum page_type{
+    EXEC,
+    FILE,
+    ANONYMOUS
+};
+
+=> virtual memory를 page 단위로 구분할 때 각 page의 segment와 성격을 구분하기
+위한 page_type
+
+struct vm_entry{
+    /* VPN */
+    uintptr_t vpn; => virtual page number
+    void* page; => virtual page address
+
+    /* Permission, 0 means read-only, 1 means write */
+    int permission; => page permission
+
+    /* Page type */
+    enum page_type p_type; => page type
+
+    /* Reference to the file object and offset */
+    struct file* file; => Anonymous page가 아닐 때 load해야할 file pointer
+    off_t ofs; => file offset
+    size_t read_bytes; => bytes to read from file
+    size_t zero_bytes; => bytes to fill with zero
+
+    /* Amount of data in the page */
+    /* Location in the swap area */
+    /* In-memory flag, 0 means in disk, 1 means in memory */
+    int flag; => data가 swap partition에 존재하는지 memory에 존재하는지 확인하기 위한 flag
+
+    /* Store the location where we swap out(using bitmap idx) */
+    size_t swap_slot; => swap partition에 저장했을 때의 위치
+
+    /* Use hash structure */
+    struct hash_elem elem; => virtual page table 관리를 위한 hash_elem
+    struct list_elem mmap_elem; => mapped memory 관리를 위한 list_elem
+};
+
+#define MB 1024*1024
+=> Stack의 최대 사이즈의 표현할 때 사용한 value
+
+struct page{
+    /* Physical page frame number */
+    uintptr_t fpn; => physical page number
+    void *kpage; => physical page address
+    struct vm_entry *vm_entry; => 이 page에 연결된 virtual page
+    struct thread *caller; => 이 physical page frame을 사용 중인 thread
+    struct list_elem elem; => physical page table을 위한 list_elem
+};
+
+=> physical page frame을 구현하기 위한 structure
+
+---- ALGORITHMS ----
+
+>> A2: In a few paragraphs, describe your code for locating the frame,
+>> if any, that contains the data of a given page.
+
+우선 virtual page만을 request에 따라 생성하고 알맞은 값들을 supplemental virtual page
+에 저장하고, 이후에 이 virtual address에 접속했을 때 demand paging을 구현하여 frame을
+ 만들고 install page 함수를 통해 할당하였다. 할당 후에 install된 suppplemental virtaul
+ page의 저장된 값들을 이용하여 필요한 data들을 실질적인 page frame에 load한다. 그리고 생
+ 성된 page frame은 lru_list라는 page frame table에 doubly linked list의 형태로 관리된다.
+ 이런 동작을 관리하는 함수는 page_fault내에 구현된 mm_page_fault 함수에서 page frame의
+ 할당과 load를 page_type에 맞게 진행한다.
+
+>> A3: How does your code coordinate accessed and dirty bits between
+>> kernel and user virtual addresses that alias a single frame, or
+>> alternatively how do you avoid the issue?
+
+Accessed bit은 swap in,out 을 할 때 victim page를 선정하기 위한 clock algorithm의 구현
+때에 이용하였고, dirty bits는 마찬가지로 swap in,out 이나 mapped memory의 제거 때 기록을
+해야할 지의 유무를 판단할 때 사용하였다. 
+
+---- SYNCHRONIZATION ----
+
+>> A4: When two user processes both need a new frame at the same time,
+>> how are races avoided?
+
+우리가 page를 할당할 때에는 palloc_get_page라는 built-in function을 이용하는데, 이 함수는
+자체적으로 lock을 사용하도록 구현되어 있어, 두 user process가 동시에 접근하더라도 하나는 wai
+t 되어 동시에 new frame에 접근하지 못하도록 구현되어 있다. 또한 alloc이 끝나면 이 page는 ins
+tall page에 의해 사용중으로 변하게 되고, 다른 user process는 이 frame을 이용할 수 없어 race
+condition이 발생하지 않는다.
+
+---- RATIONALE ----
+
+>> A5: Why did you choose the data structure(s) that you did for
+>> representing virtual-to-physical mappings?
+
+이런 structure를 이용한 이유는 기존의 pintos는 data에 접근하지 않더라도 data의 생성 즉시 
+그에 해당하는 frame을 할당해 memory의 낭비가 심했다. 그래서 lazy frame allocation을 구현하
+고자 나중에 frame을 할당하고 data를 load하는데 필요한 정보를 vm_entry라는 supplementary vi
+rtual page에 저장하고 추후에 data의 실질적인 access가 요청되었을 때 page라는 frame structu
+re를 할당하고 이 요청을 한 virtual page와 thread의 정보를 page내에 저장함으로써 lazy alloca
+tion을 구현하였다.
+
+		       PAGING TO AND FROM DISK
+		       =======================
+
+---- DATA STRUCTURES ----
+
+>> B1: Copy here the declaration of each new or changed `struct' or
+>> `struct' member, global or static variable, `typedef', or
+>> enumeration.  Identify the purpose of each in 25 words or less.
+
+struct lock frame_lock;
+=> frame에 접속할 때 frame table의 atomic한 구현을 위한 lock
+
+struct lock swap_lock;
+=> swap 시 swap partition을 관리하는 bitmap의 atomic한 구현을 위한 lock
+
+struct bitmap *swap_bitmap;
+=> swap 시 swap partition을 관리하기 위한 swap_partition_bitmap
+
+struct list_elem* clock;
+=> swap 시 다음 방출될 frame을 결정하기 위한 clock(clock algorithm에 사용)
+
+---- ALGORITHMS ----
+
+>> B2: When a frame is required but none is free, some frame must be
+>> evicted.  Describe your code for choosing a frame to evict.
+
+evict frame을 하기 위해서 lecture note에 나와있는대로 Least Recently Used
+algorithm의 approximation인 clock algorithm을 구현하였다. 우선 select_victim
+함수를 호출하여 현재 lru_list에 관리되고 존재하는 frame들 중 accessed bit이
+0인 frame을 찾는다. 이때 clock은 이 찾는 frame을 가리키고 있고 만약 이 frame의
+accessed bit이 1이 라면 0으로 바꾸고 다음 frame으로 넘어간다. 만약 lru list의
+끝에 도달하면 다시 lru list의 처음으로 돌아와 같은 연산을 반복하여 evict page frame
+을 선정한다.
+
+>> B3: When a process P obtains a frame that was previously used by a
+>> process Q, how do you adjust the page table (and any other data
+>> structures) to reflect the frame Q no longer has?
+
+A에서 표현했듯이, frame(named struct page)에는 현재 사용중인 thread와 연결된 virtual
+page를 struct member에 저장하고 있다. 따라서 이전에 Q에서 사용중이던 frame이 P에서 
+사용중이여진다면 연결된 virtual page를 제거하고 현재 사용중인 thread를 Q->P로 set하여
+이 frame이 Q에서 사용되지 않고 P에서 사용되고 있음을 표현할 수 있다.
+
+>> B4: Explain your heuristic for deciding whether a page fault for an
+>> invalid virtual address should cause the stack to be extended into
+>> the page that faulted.
+
+lecture note에서 제시한 대로 접근한 page fault를 일으킨 address(fault addr)가 만약
+stack pointer(esp)보다 32byte만큼 작지 않으면 즉, fault addr >= esp - 32 이면 fault
+addr에 대한 vm_entry를 stack인 anonymous page로 맞게 설정하고 mm_fault_handler를 호출
+하여 해당하는 page frame을 할당받도록 하였다. 이 때 스택은 한 page를 더 할당받으므로 이런
+접근에 대해서 stack growth를 구현하였다.
+
+---- SYNCHRONIZATION ----
+
+>> B5: Explain the basics of your VM synchronization design.  In
+>> particular, explain how it prevents deadlock.  (Refer to the
+>> textbook for an explanation of the necessary conditions for
+>> deadlock.)
+
+frame table인 lru list와 swap_partition을 관리하는 swap_bitmap 구조체는 모든 user process
+에서 접근할 수 있는 global한 structure로 race condition이나 deadlock이라는 문제를 야기할
+수 있다. 따라서 lru_list에 대한 접근은 frame_lock이라는 lock을 통해 atomic 하게 관리하고,
+swap_bitmap이라는 구조체는 swap_lock을 통해 atomic하게 관리함으로써 두 개 이상의 process가
+이 global한 structure에 동시에 접근하는 것을 허락하지 않는다. 또한 이런 lock들이 존재할 때
+두 process가 각각 하나의 lock을 소유한 채로 다른 하나의 lock을 요구한다면 deadlock condit
+ion이 발생하므로 이 swap_bitmap code는 온전히 frame_lock에 의해 보호되는 critical section
+내에서 접근하도록 코딩하였다. 
+
+>> B6: A page fault in process P can cause another process Q's frame
+>> to be evicted.  How do you ensure that Q cannot access or modify
+>> the page during the eviction process?  How do you avoid a race
+>> between P evicting Q's frame and Q faulting the page back in?
+
+모든 page에 접근할 때에는 lock을 얻고 접근을 하도록 코드를 작성하였다. 따라서 evict할 페이지
+를 선택하는 것도 이 Q가 본인의 frame을 사용하고 있지 않고 어떠한 프로세스도 이 frame에 접근
+하지 않아야 하고, 만약 접근 중이라면 lock에 의해 wait 되므로 atomic하게 접근하게 된다.
+따라서 race condition을 해결할 수 있다.
+
+>> B7: Suppose a page fault in process P causes a page to be read from
+>> the file system or swap.  How do you ensure that a second process Q
+>> cannot interfere by e.g. attempting to evict the frame while it is
+>> still being read in?
+
+swap_partition이나 file system은 각각의 lock에 의해서 보호되고 있고, 접근을 하기 위해서는
+lock을 획득해야만 접근이 가능하다. reading이나 writing과 같은 동작들은 syscall 구현 때
+lock을 획득하고 종료 시에 lock을 방출하도록 설계되어 있어 read나 write 혹은 다른 프로세스가
+접근 중에 swap partition에 접근하거나 file system에 접근은 할 수 없게 되므로 race conditi
+on을 없앨 수 있다.
+
+>> B8: Explain how you handle access to paged-out pages that occur
+>> during system calls.  Do you use page faults to bring in pages (as
+>> in user programs), or do you have a mechanism for "locking" frames
+>> into physical memory, or do you use some other design?  How do you
+>> gracefully handle attempted accesses to invalid virtual addresses?
+
+swap에 의해 paged-out 된 page들에 대한 접근은 page-fault에서 supplemental virtaul page인
+struct vm_entry의 구조체의 flag를 확인하여 처리하는데 swap-out 된 페이지는 swap-out 시에
+flag를 0으로 바꾸어 memory가 아닌 disk내에 존재함을 표시하고, page-fault에서 이 값을 확인
+해 현재 frame이 존재하지 않는데 fault_addr에 해당하는 vm_entry의 flag 값이 0이라면 swap-
+in 함수를 통해 page를 가져오고, vm_entry가 존재하지 않는다면 아직 할당 자체가 되지 않았
+다는 의미이므로 stack growth가 가능한 addr를 제외하고는 invalid virtual address임을 확인
+할 수 있다.
+
+---- RATIONALE ----
+
+>> B9: A single lock for the whole VM system would make
+>> synchronization easy, but limit parallelism.  On the other hand,
+>> using many locks complicates synchronization and raises the
+>> possibility for deadlock but allows for high parallelism.  Explain
+>> where your design falls along this continuum and why you chose to
+>> design it this way.
+
+가급적이면 사용하는 lock의 갯수를 줄여 deadlock condition이나 synchronization의 구현을
+복잡하지 않게 하도록 implement하였다. 하지만 lock으로 제한하는 부분을 최소화하고 자주 접근
+하는 frame table와 swap partition bitmap의 경우는 서로 다른 lock을 사용하여 제한된 paral
+lelism 내에서 최대한의 performance를 보이고자 하였다. 
+
+			 MEMORY MAPPED FILES
+			 ===================
+
+---- DATA STRUCTURES ----
+
+>> C1: Copy here the declaration of each new or changed `struct' or
+>> `struct' member, global or static variable, `typedef', or
+>> enumeration.  Identify the purpose of each in 25 words or less.
+
+struct list mmap_list; => 아래의 mmap_file 관리를 위한 list 구조체
+(thread 내의 struct member)
+
+struct mmap_file{
+    mapid_t id; => mmap_file 구조체의 식별자(id)
+    struct file *file; => mmap_file이 형성될 때 읽어들인 file 
+    struct list_elem elem; => mmap_list에서의 관리를 위한 elem
+    struct list vm_entry_list; => 해당 file mapped virtual page 관리를 위한 list 구조체
+};
+=> mapping 된 virtual page를 file 별로 관리하기 위한 구조체 
+
+
+---- ALGORITHMS ----
+
+>> C2: Describe how memory mapped files integrate into your virtual
+>> memory subsystem.  Explain how the page fault and eviction
+>> processes differ between swap pages and other pages.
+
+memory mapped file은 virtual page의 p_type이 FILE로 EXEC, ANONYMOUS와는 구별되게 관리
+된다. 이 memory page들은 kernel의 동작중에 형성되는 것이 아니라 오로지 user의 map 이나 
+munmap과 같은 syscall에 의해 요청되어 형성되는 page들로 요청이 들어오면 알맞은 값들을 설정
+한 vm_entry를 할당하고 새로운 page frame을 부여하여 그 frame에 file의 값들을 read한다. 
+반대로 munmap이 호출되면 이 frame의 값들이 변경됐는지 page의 dirty bit을 조사하고, 변경
+사항이 있다면 이 mapped file에 기록하고 아니라면 단순히 해당하는 vm_entry와 page frame들을
+모두 삭제한다. 다른 page들은 eviction이 일어나면 swap partition에 기록되고 이후에 호출 시
+다시 swap in 과정을 통해 불러들이지만 이 file mapped memory는 swap partition이 아니라
+해당하는 file에 dirty 유무에 따라 기록될지 말지를 정하고 이후에 다시 file에서 불러들이는 방
+식으로 eviction이 진행된다.
+
+>> C3: Explain how you determine whether a new file mapping overlaps
+>> any existing segment.
+
+sys_mmap이 호출되었을 때, 할당하기 전에 먼저 file의 length를 조사하여 읽어야할 byte를 조사
+한다 그리고 이 length를 PGSIZE(4096bytes)로 나눈 값을 올림하여 할당해야할 page의 갯수(n)를 
+확인하고 요청된 address addr 부터 addr+n*PGSIZE 까지 할당된 page가 없는 것을 확인한 후에
+vm_entry의 할당을 진행하여 이것들이 이전에 존재하던 segment를 overlap 하지 않도록 구현한다.
+만약 overlap을 해야한다면 fail인 경우로 -1을 리턴하고 종료한다.
+
+---- RATIONALE ----
+
+>> C4: Mappings created with "mmap" have similar semantics to those of
+>> data demand-paged from executables, except that "mmap" mappings are
+>> written back to their original files, not to swap.  This implies
+>> that much of their implementation can be shared.  Explain why your
+>> implementation either does or does not share much of the code for
+>> the two situations.
+
+이 두 가지의 다른 구현은 매우 유사한 방법으로 진행되었는데 서로 다른 점은 하나는 binary
+file에서 load_segment에 의해 user process가 시작될 때 만들어진다는 점이고 다른 하나는 
+user process의 syscall 요청으로 만들어진다는 것이다. 둘 다 파일을 로드하고 동작한다는 
+것 때문에 매우 많은 부분이 동일한 코드의 형태를 보이는데 다른 부분은 swap 시에 executable
+들이 들어있는 page는 swap에 기록되고, file mapping page들은 각각의 file에 기록된다는 점
+에서만 큰 차이점을 보였다. 
+
+			   SURVEY QUESTIONS
+			   ================
+
+Answering these questions is optional, but it will help us improve the
+course in future quarters.  Feel free to tell us anything you
+want--these questions are just to spur your thoughts.  You may also
+choose to respond anonymously in the course evaluations at the end of
+the quarter.
+
+>> In your opinion, was this assignment, or any one of the three problems
+>> in it, too easy or too hard?  Did it take too long or too little time?
+
+Quite hard but much time spent to debug.
+
+>> Did you find that working on a particular part of the assignment gave
+>> you greater insight into some aspect of OS design?
+
+All part of this project give me insight of OS.
+
+>> Is there some particular fact or hint we should give students in
+>> future quarters to help them solve the problems?  Conversely, did you
+>> find any of our guidance to be misleading?
+
+No.
+
+>> Do you have any suggestions for the TAs to more effectively assist
+>> students, either for future quarters or the remaining projects?
+
+>> Any other comments?

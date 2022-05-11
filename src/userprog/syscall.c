@@ -9,8 +9,10 @@
 #include "../threads/vaddr.h"
 #include "userprog/pagedir.h"
 #include "userprog/exception.h"
+#include "../devices/shutdown.h"
 #include "../threads/palloc.h"
 #include "../vm/page.h"
+#include "../vm/swap.h"
 
 struct lock filesys_lock;
 
@@ -121,11 +123,12 @@ void sys_exit(int status)
   
   struct thread *cur = thread_current();
 
+  /* Close all mmaped vm_entry */
+  sys_munmap(CLOSE_ALL);
+
   /* First all child process stop until parent call wait */
   sema_down(&cur->wait_parent);
   
-  /* Close all mmaped vm_entry */
-  sys_munmap(CLOSE_ALL);
 
   printf("%s: exit(%d)\n",cur->name,status);
   if(cur->is_parent_wait == true)
@@ -284,7 +287,6 @@ int sys_write(int fd, const void *buffer, unsigned size)
     lock_release(&filesys_lock);
     return -1;
   }
-  char buf = ((char*)buffer)[0];
   /* Check the buffer's element is not on the kernel space */
 
   struct file* file;
@@ -441,6 +443,7 @@ mapid_t sys_mmap (int fd, void *addr)
   off_t file_size = file_length(file);
   size_t page_read_bytes = file_size;
   int page_num = file_size/PGSIZE;
+  off_t ofs = 0;
   /* Check size of file */
   if(file_size == 0)
     return -1;
@@ -461,12 +464,16 @@ mapid_t sys_mmap (int fd, void *addr)
     {
       vm_entry->read_bytes = PGSIZE;
       vm_entry->zero_bytes = 0;
+      vm_entry->ofs = ofs;
       page_read_bytes -= PGSIZE;
+      ofs += vm_entry->read_bytes;
     }
     else
     {
       vm_entry->read_bytes = page_read_bytes;
       vm_entry->zero_bytes = PGSIZE-page_read_bytes;
+      vm_entry->ofs = ofs;
+      ofs += vm_entry->read_bytes;
     }
     list_push_back(&mmap->vm_entry_list,&vm_entry->mmap_elem);
     /* Allocate */
@@ -493,16 +500,20 @@ void sys_munmap (mapid_t mapid)
         for(v; v!=list_end(&mmap->vm_entry_list); v=list_next(v))
         {
           struct vm_entry *vm_entry = list_entry(v,struct vm_entry,mmap_elem);
-          lock_acquire(&frame_lock);
-          swap_out(find_frame(vm_entry));
-          lock_release(&frame_lock);
+          if(vm_entry->p_type == FILE)
+          {
+            lock_acquire(&frame_lock);
+            swap_out(find_frame(vm_entry));
+            lock_release(&frame_lock);
+          }
         }
-        sys_close(mmap->file);
+        file_close(mmap->file);
         e = list_next(e);
         release_mmap_file(mmap);
+        if(mapid != CLOSE_ALL)
+          break;
       }
-      if(mapid != CLOSE_ALL)
-        break;
+      
     }
   }
 }

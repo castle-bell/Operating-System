@@ -3,6 +3,7 @@
 #include "../threads/vaddr.h"
 #include "../threads/thread.h"
 #include "../userprog/pagedir.h"
+#include "../userprog/syscall.h"
 #include "../devices/block.h"
 #include "../lib/kernel/bitmap.h"
 #include "../threads/thread.h"
@@ -64,10 +65,7 @@ bool write_partition(struct page* page, enum page_type type)
     else
     {
         struct vm_entry *vm_entry = page->vm_entry;
-        off_t pos = file_tell(vm_entry->file);
-        file_write(vm_entry->file,vm_entry->page,PGSIZE);
-        /* Set the origin position */
-        file_seek(vm_entry->file,pos);
+        file_write_at(vm_entry->file,vm_entry->page,PGSIZE,vm_entry->ofs);
     }
 
     /* Set page is not dirty */

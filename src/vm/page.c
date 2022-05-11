@@ -4,6 +4,7 @@
 #include "vm/page.h"
 #include "../threads/vaddr.h"
 #include "../threads/thread.h"
+#include "../threads/malloc.h"
 #include "../userprog/pagedir.h"
 #include "../devices/block.h"
 #include "vm/swap.h"
@@ -119,7 +120,6 @@ void release_page(struct page* page_frame)
     void* kpage = page_frame->kpage;
 
     /* Check whether install_page succeed */
-    // if((page_frame->caller != NULL) && (page_frame->vm_entry != NULL))
     pagedir_clear_page(page_frame->caller->pagedir, page_frame->vm_entry->page);
 
     list_remove(&page_frame->elem);
@@ -222,6 +222,7 @@ static struct list_elem* get_next_clock(void)
         clock = list_begin(&lru_list);
     else
         clock = list_next(clock);
+    return clock;
 }
 
 /* Select victim page using clock algorithm from page directory */
