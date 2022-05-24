@@ -6,11 +6,58 @@
 #include "filesys/free-map.h"
 #include "filesys/inode.h"
 #include "filesys/directory.h"
+#include "../threads/malloc.h"
 
 /* Partition that contains the file system. */
 struct block *fs_device;
 
 static void do_format (void);
+
+/* Initializes the buffer_head */
+void buffer_head_init (void)
+{
+  list_init(&list_buffer_head);
+  struct buffer_head *head;
+
+  for(int i = 0; i<64; i++)
+  {
+    
+    if((head = (struct buffer_head *)malloc(sizeof(struct buffer_head))) == NULL)
+    {
+      printf("Buffer head Malloc failed\n");
+      return;
+    }
+
+    /* Initialize the element of buffer_head */
+    head->dirty = false;
+    head->accessed = false;
+    lock_init(&(head->buffer_lock));
+    head->on_disk_loc = 0;
+    head->data = NULL;
+    list_push_back(&list_buffer_head, &(head->elem));
+  }
+}
+
+struct buffer_head *find_buffer_head(block_sector_t idx)
+{
+  ASSERT(&list_buffer_head);
+
+  /* Scan the list and find the buf_head which has on_disk_loc == idx */
+  struct list_elem *e;
+  struct buffer_head *head;
+
+  for(e = list_begin(&list_buffer_head); e != list_end(&list_buffer_head); e = list_next(e))
+  {
+    head = list_entry(e, struct buffer_head, elem);
+    if((head->on_disk_loc) == idx)
+      break;
+  }
+
+  if(e == list_end(&list_buffer_head))
+    return NULL;
+
+  return head;
+}
 
 /* Initializes the file system module.
    If FORMAT is true, reformats the file system. */
@@ -27,7 +74,12 @@ filesys_init (bool format)
   if (format) 
     do_format ();
 
+  /* Initialize the buffer cache and buffer head */
+  buffer_cache = calloc(64,512);
+  buffer_head_init();
+  
   free_map_open ();
+
 }
 
 /* Shuts down the file system module, writing any unwritten data

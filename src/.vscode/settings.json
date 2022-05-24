@@ -11,6 +11,8 @@
         "lib.h": "c",
         "*.inc": "c",
         "string_view": "c",
-        "typeinfo": "c"
+        "typeinfo": "c",
+        "cstdlib": "c",
+        "debug.h": "c"
     }
 }
