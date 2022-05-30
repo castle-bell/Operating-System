@@ -127,6 +127,7 @@ thread_init (void)
   initial_thread->status = THREAD_RUNNING;
   initial_thread->tid = allocate_tid ();
   initial_thread->parent = NULL;
+  initial_thread->cd = 1;
 }
 
 /* Starts preemptive thread scheduling by enabling interrupts.
@@ -532,6 +533,11 @@ init_thread (struct thread *t, const char *name, int priority)
 #endif
   t->is_loaded = false;
   list_init(&t->mmap_list);
+
+  /* Set inherits the parent's cd */
+  t->cd = (running_thread()->cd != 1 && running_thread()->cd != 0) ? 
+          running_thread()->cd : 1;
+
   intr_set_level (old_level);
 }
 

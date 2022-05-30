@@ -5,6 +5,8 @@
 #include "threads/thread.h"
 #include "../filesys/filesys.h"
 #include "../filesys/file.h"
+#include "../filesys/directory.h"
+#include "../filesys/free-map.h"
 #include "./process.h"
 #include "../threads/vaddr.h"
 #include "userprog/pagedir.h"
@@ -15,6 +17,8 @@
 #include "../vm/swap.h"
 
 struct lock filesys_lock;
+extern struct bitmap *free_map;
+
 
 static void syscall_handler (struct intr_frame *);
 
@@ -29,14 +33,7 @@ bool check_esp_validity(void *esp)
     return false;
   if(esp < (void *) 0x08048000)
     return false;
-  
-  // Project 2
-  // /* Check esp points the mapped region to get int(check 4 bytes)*/
-  // for(int i = 0; i<4; i++)
-  // {
-  //   if(pagedir_get_page(thread_current()->pagedir,esp+i) == NULL)
-  //     return false;
-  // }
+
   return true;
 }
 
@@ -62,22 +59,6 @@ bool check_arg_validity(void *arg, int n UNUSED)
   if(!find_vme(arg,&cur->vm))
     return false;
   return true;
-
-  // Project 2
-  /* Check the n element of arg is mapped to phys_mem */
-  // struct thread *cur = thread_current();
-  // void * page;
-  // char * array = (char *)arg;
-
-  // int i;
-  // for(i = 0; i<n; i++)
-  // {
-  //   if((page = pagedir_get_page(cur->pagedir,arg+i)) == NULL)
-  //     return false;
-    
-  //   if(array[i] == '\0')
-  //     break;
-  // }
 }
 
 bool check_buffer_validity(void *buffer, unsigned size, bool write, void* esp)
@@ -518,6 +499,175 @@ void sys_munmap (mapid_t mapid)
   }
 }
 
+bool sys_mkdir(const char *dir)
+{
+  bool create;
+
+  lock_acquire(&filesys_lock);
+  /* If file_name = [], then exit */
+  if(strlen(dir) == 0)
+  {
+    lock_release(&filesys_lock);
+    return false;
+  }
+
+  /* Get free sector , 원래는 lock이 필요할 듯 */
+  struct thread *cur = thread_current();
+
+  struct dir *cur_dir;
+  const char *name = check_path_validity(dir, &cur_dir);
+  if(name == NULL)
+  {
+    lock_release(&filesys_lock);
+    return false;
+  }
+
+  block_sector_t sector;
+  if(!free_map_allocate(1, &sector))
+  {
+    lock_release(&filesys_lock);
+    return false;
+  }
+
+  ASSERT(cur_dir);
+
+  create = dir_create(sector,16) && dir_add(cur_dir,name,sector);
+
+  if(create == false)
+  {
+    dir_close(cur_dir);
+    free_map_release(sector, 1);
+    lock_release(&filesys_lock);
+    return false;
+  }
+
+  dir_close(cur_dir);
+  lock_release(&filesys_lock);
+  return create;
+}
+
+bool sys_chdir(const char *dir)
+{
+  lock_acquire(&filesys_lock);
+
+  struct inode *inode;
+  struct dir *cur_dir;
+  const char *name = check_path_validity(dir, &cur_dir);
+  if(!dir_lookup(cur_dir, name, &inode))
+  {
+    lock_release(&filesys_lock);
+    return false;
+  }
+
+  /* Set the current thread inode->sector */
+  struct thread *cur = thread_current();
+  cur->cd = inode->sector;
+  dir_close(cur_dir);
+
+  lock_release(&filesys_lock);
+
+  return true;
+}
+
+bool sys_readdir(int fd, char *name)
+{
+  lock_acquire(&filesys_lock);
+
+  // if(fd < 3 || fd > 127)
+  // {
+  //   lock_release(&filesys_lock);
+  //   return false;
+  // }
+
+  // struct file* file;
+  // struct thread* cur = thread_current();
+
+  // /* Check range of fd */
+  // file = cur->fdt[fd];
+
+  // if((file == NULL) || (file->inode->data.is_directory == false))
+  // {
+  //   lock_release(&filesys_lock);
+  //   return false;
+  // }
+
+
+  // struct dir *dir = dir_open(file->inode);
+
+  // struct dir_entry e;
+  // size_t ofs;
+
+  // for(ofs = 0; inode_read_at(dir->inode, &e, sizeof e, ofs) == sizeof e;
+  //     ofs += sizeof e)
+  // {
+  //   if(e.in_use)
+  //   {
+
+  //   }
+  // }
+
+  return true;
+
+  lock_release(&filesys_lock);
+}
+
+bool sys_isdir(int fd)
+{
+  lock_acquire(&filesys_lock);
+
+  if(fd < 3 || fd > 127)
+  {
+    lock_release(&filesys_lock);
+    return false;
+  }
+
+  struct file* file;
+  struct thread* cur = thread_current();
+
+  /* Check range of fd */
+  file = cur->fdt[fd];
+
+  if(file == NULL)
+  {
+    lock_release(&filesys_lock);
+    return false;
+  }
+
+  if(!file->inode->data.is_directory)
+  {
+    lock_release(&filesys_lock);
+    return false;
+  }
+
+  lock_release(&filesys_lock);
+  return true;
+}
+
+int sys_inumber(int fd)
+{
+  lock_acquire(&filesys_lock);
+
+  if(fd < 3 || fd > 127)
+  {
+    lock_release(&filesys_lock);
+    return -1;
+  }
+
+  struct file* file;
+  struct thread* cur = thread_current();
+
+  /* Check range of fd */
+  file = cur->fdt[fd];
+
+  if(file == NULL)
+  {
+    lock_release(&filesys_lock);
+    return -1;
+  }
+  return file->inode->sector;
+
+}
+
 /* Check the stack is enougth to store in user address, and
    get argument using esp and store */
 void get_argument(void *esp, int* argument, int count)
@@ -660,6 +810,32 @@ syscall_handler (struct intr_frame *f)
       get_argument(esp,argument,1);
       sys_munmap(argument[0]);
       break;
+
+    case SYS_MKDIR:
+      get_argument(esp,argument,1);
+      f->eax = sys_mkdir(argument[0]);
+      break;
+
+    case SYS_CHDIR:
+      get_argument(esp,argument,1);
+      f->eax = sys_chdir(argument[0]);
+      break;
+
+    case SYS_READDIR:
+      get_argument(esp,argument,2);
+      f->eax = sys_readdir(argument[0], argument[1]);
+      break;
+
+    case SYS_ISDIR:
+      get_argument(esp,argument,1);
+      f->eax = sys_isdir(argument[0]);
+      break;
+
+    case SYS_INUMBER:
+      get_argument(esp,argument,1);
+      f->eax = sys_inumber(argument[0]);
+      break;
+      
 
     default:
       sys_exit(-1);

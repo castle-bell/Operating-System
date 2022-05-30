@@ -65,7 +65,8 @@ bool write_partition(struct page* page, enum page_type type)
     else
     {
         struct vm_entry *vm_entry = page->vm_entry;
-        file_write_at(vm_entry->file,vm_entry->page,PGSIZE,vm_entry->ofs);
+        off_t len = (file_length(vm_entry->file) < PGSIZE) ? file_length(vm_entry->file) : PGSIZE;
+        file_write_at(vm_entry->file,vm_entry->page,len,vm_entry->ofs);
     }
 
     /* Set page is not dirty */

@@ -6,7 +6,7 @@
 #include "filesys/inode.h"
 
 static struct file *free_map_file;   /* Free map file. */
-static struct bitmap *free_map;      /* Free map, one bit per sector. */
+struct bitmap *free_map;      /* Free map, one bit per sector. */
 
 /* Initializes the free map. */
 void
@@ -38,6 +38,92 @@ free_map_allocate (size_t cnt, block_sector_t *sectorp)
   if (sector != BITMAP_ERROR)
     *sectorp = sector;
   return sector != BITMAP_ERROR;
+}
+
+bool free_map_alloc (size_t sectors, struct inode_disk *inode_disk)
+{
+  block_sector_t sec = sectors;
+  block_sector_t pos = inode_disk->pos;
+  block_sector_t level = 0;
+  block_sector_t two_lev = 0;
+  block_sector_t prev_two_lev = 0;
+  block_sector_t idx = 0;
+  block_sector_t start;
+
+  struct index_disk *indirect_index;
+  indirect_index = (struct index_disk *)calloc(1, sizeof(struct index_disk));
+  struct index_disk *double_index;
+  double_index = (struct index_disk *)calloc(1, sizeof(struct index_disk));
+  struct index_disk *double_entry;
+  double_entry = (struct index_disk *)calloc(1, sizeof(struct index_disk));
+
+  ASSERT(sizeof(struct index_disk) == BLOCK_SECTOR_SIZE);
+
+  while(sectors > 0)
+  {
+    while(!free_map_allocate(sec, &start))
+    {
+      printf("create expanded\n");
+      if(sec == 0)
+      {
+        ASSERT(0);
+        return false;
+      }
+      sec = sec/2;
+    }
+    sectors -= sec;
+    /* Update the element of inode_disk */
+    // update_block_sector(pos, sec);
+    for(block_sector_t i = 0; i < sec; i++)
+    {
+      idx = get_pos(pos, &level, &two_lev);
+      if(level == 0)
+        inode_disk->direct_map_table[idx] = start + i;
+      else if(level == 1)
+        indirect_index->direct_map_table[idx] = start + i;
+      /* level == 2 */
+      else
+      {
+        if(prev_two_lev != two_lev)
+        {
+          free_map_allocate(1, &double_index->direct_map_table[prev_two_lev]);
+          block_write(fs_device, double_index->
+                      direct_map_table[prev_two_lev], double_entry);
+          memset(double_entry, 0, sizeof(struct index_disk));
+          prev_two_lev = two_lev;
+        }
+        double_entry->direct_map_table[idx] = start + i;
+      }
+      // printf("level: %d, two_lev: %d, idx: %d, sec: %d\n", level, two_lev, idx, inode_disk->start + i);
+      pos ++;
+    }
+  }
+  inode_disk->pos = pos;
+
+  /* Store to disk */
+  if(indirect_index->direct_map_table[0] != 0)
+  {
+    free_map_allocate(1, &inode_disk->indirect_block_sec);
+    block_write(fs_device, inode_disk->indirect_block_sec, indirect_index);
+  }
+  if(double_entry->direct_map_table[0] != 0)
+  {
+    free_map_allocate(1, &double_index->direct_map_table[two_lev]);
+    block_write(fs_device, double_index->direct_map_table[two_lev], double_entry);
+  }
+  if(double_index->direct_map_table[0] != 0)
+  {
+    free_map_allocate(1, &inode_disk->double_indirect_block_sec);
+    block_write(fs_device, inode_disk->double_indirect_block_sec, double_index);
+  }
+
+  free(indirect_index);
+  free(double_entry);
+  free(double_index);
+
+  ASSERT(sectors == 0);
+
+  return true;
 }
 
 /* Makes CNT sectors starting at SECTOR available for use. */
@@ -73,7 +159,7 @@ void
 free_map_create (void) 
 {
   /* Create inode. */
-  if (!inode_create (FREE_MAP_SECTOR, bitmap_file_size (free_map)))
+  if (!inode_create (FREE_MAP_SECTOR, bitmap_file_size (free_map), 0))
     PANIC ("free map creation failed");
 
   /* Write bitmap to file. */

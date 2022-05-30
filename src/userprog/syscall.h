@@ -32,6 +32,12 @@ void sys_sendsig(pid_t pid, int signum);
 void sched_yield();
 mapid_t sys_mmap (int fd, void *addr);
 void sys_munmap (mapid_t mapid);
+bool sys_mkdir(const char *dir);
+bool sys_chdir(const char *dir);
+bool sys_readdir(int fd, char *name);
+bool sys_isdir(int fd);
+int sys_inumber(int fd);
+
 void get_argument(void *esp, int* argument, int count);
 
 #endif /* userprog/syscall.h */

@@ -6,7 +6,9 @@
 #include "filesys/free-map.h"
 #include "filesys/inode.h"
 #include "filesys/directory.h"
+#include "filesys/cache.h"
 #include "../threads/malloc.h"
+#include "../threads/thread.h"
 
 /* Partition that contains the file system. */
 struct block *fs_device;
@@ -16,6 +18,7 @@ static void do_format (void);
 /* Initializes the buffer_head */
 void buffer_head_init (void)
 {
+  cache_clock = NULL;
   list_init(&list_buffer_head);
   struct buffer_head *head;
 
@@ -29,10 +32,12 @@ void buffer_head_init (void)
     }
 
     /* Initialize the element of buffer_head */
+    head->idx = i;
+    head->is_used = false;
     head->dirty = false;
     head->accessed = false;
     lock_init(&(head->buffer_lock));
-    head->on_disk_loc = 0;
+    head->on_disk_loc = UINT32_MAX;
     head->data = NULL;
     list_push_back(&list_buffer_head, &(head->elem));
   }
@@ -41,7 +46,6 @@ void buffer_head_init (void)
 struct buffer_head *find_buffer_head(block_sector_t idx)
 {
   ASSERT(&list_buffer_head);
-
   /* Scan the list and find the buf_head which has on_disk_loc == idx */
   struct list_elem *e;
   struct buffer_head *head;
@@ -59,6 +63,67 @@ struct buffer_head *find_buffer_head(block_sector_t idx)
   return head;
 }
 
+void path_parsing(char *argument[], int* count, char* path)
+{
+  int i = 0;
+  char *save_ptr;
+  
+  char *ptr = strtok_r(path,"/",&save_ptr);
+  while(1)
+  {
+    if((ptr == NULL) || i >= 100)
+      break;
+    argument[i] = ptr;
+    i++;
+    ptr = strtok_r(NULL,"/",&save_ptr);
+  }
+  argument[i] = NULL;
+  *count = i;
+}
+
+/* Check the path validity and store the parent directory into dir 
+   (Path should be absolute path) */
+char *check_path_validity(char *path, struct dir **dir)
+{
+  char *argument[100];
+  int count = 0;
+  bool absolute;
+
+  char copy[strlen(path) + 1];
+  strlcpy(copy,path,strlen(path)+1);
+  copy[strlen(path)] = '\0';
+
+  /* Check whether absolute path or relative path */
+  if(copy[0] == '/')
+    absolute = true;
+  else
+    absolute = false;
+
+
+  path_parsing(argument, &count, copy);
+
+  struct dir *search;
+  struct inode *inode;
+  if(absolute == true)
+    search = dir_open_root();
+  else
+    search = dir_open(inode_open(thread_current()->cd));
+
+  /* Check the validity of path */
+  /* 0~i-1 element should be already existed */
+  for(int i = 0; i < count - 1; i++)
+  {
+    if(!dir_lookup(search, argument[i], &inode))
+      return NULL;
+  
+    dir_close(search);
+    search = dir_open(inode);
+  }
+
+  *dir = search;
+  return path + (argument[count - 1] - copy);
+}
+
 /* Initializes the file system module.
    If FORMAT is true, reformats the file system. */
 void
@@ -71,12 +136,12 @@ filesys_init (bool format)
   inode_init ();
   free_map_init ();
 
-  if (format) 
-    do_format ();
-
   /* Initialize the buffer cache and buffer head */
   buffer_cache = calloc(64,512);
   buffer_head_init();
+
+  if (format) 
+    do_format ();
   
   free_map_open ();
 
@@ -87,6 +152,9 @@ filesys_init (bool format)
 void
 filesys_done (void) 
 {
+  /* Write all buffer cache */
+  write_all_dirty(&list_buffer_head);
+
   free_map_close ();
 }
 
@@ -98,11 +166,14 @@ bool
 filesys_create (const char *name, off_t initial_size) 
 {
   block_sector_t inode_sector = 0;
-  struct dir *dir = dir_open_root ();
+  struct dir *dir;
+  char *path_name = check_path_validity(name, &dir);
+  if(path_name == NULL)
+    return false;
   bool success = (dir != NULL
                   && free_map_allocate (1, &inode_sector)
-                  && inode_create (inode_sector, initial_size)
-                  && dir_add (dir, name, inode_sector));
+                  && inode_create (inode_sector, initial_size, 0)
+                  && dir_add (dir, path_name, inode_sector));
   if (!success && inode_sector != 0) 
     free_map_release (inode_sector, 1);
   dir_close (dir);
@@ -118,11 +189,14 @@ filesys_create (const char *name, off_t initial_size)
 struct file *
 filesys_open (const char *name)
 {
-  struct dir *dir = dir_open_root ();
+  struct dir *dir;
+  char *path_name = check_path_validity(name, &dir);
+  if(path_name == NULL)
+    return NULL;
   struct inode *inode = NULL;
 
   if (dir != NULL)
-    dir_lookup (dir, name, &inode);
+    dir_lookup (dir, path_name, &inode);
   dir_close (dir);
   return file_open (inode);
 }
@@ -134,8 +208,38 @@ filesys_open (const char *name)
 bool
 filesys_remove (const char *name) 
 {
-  struct dir *dir = dir_open_root ();
-  bool success = dir != NULL && dir_remove (dir, name);
+  bool success;
+  struct dir *dir;
+  char *path_name = check_path_validity(name, &dir);
+  
+  if(path_name == NULL)
+    return false;
+
+  /* Check whether regular file or directory */
+  struct inode *inode = NULL;
+  if(!dir_lookup(dir, path_name, &inode));
+    return false;
+
+  if(inode->data.is_directory)
+  {
+    struct dir *remove = dir_open(inode);
+    /* Check that the dir is empty */
+    if(!dir_isempty(remove))
+    {
+      dir_close(remove);
+      return false;
+    }
+    else
+    {
+      dir_close(remove);
+      dir_remove(dir, path_name);
+      return true;
+    }
+
+  }
+  else
+    success = dir != NULL && dir_remove (dir, path_name);
+
   dir_close (dir); 
 
   return success;

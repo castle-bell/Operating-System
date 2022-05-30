@@ -142,6 +142,9 @@ struct thread
 
     /* List of mmap */
     struct list mmap_list;
+
+    /* Sector number of Current directory */
+    block_sector_t cd;
   };
 
 /* If false (default), use round-robin scheduler.

@@ -7,6 +7,7 @@
 #include "threads/interrupt.h"
 #include "threads/synch.h"
 #include "threads/thread.h"
+#include "../filesys/cache.h"
   
 /* See [8254] for hardware details of the 8254 timer chip. */
 
@@ -171,7 +172,23 @@ static void
 timer_interrupt (struct intr_frame *args UNUSED)
 {
   ticks++;
-  thread_tick ();
+  timer_ticks();
+  /* Write all dirty cache in every 5 secs */
+  // if(timer_ticks () % (5*TIMER_FREQ) == 0)
+  // {
+  //   struct list_elem *e;
+  //   struct buffer_head *buf_head;
+
+  //   for(e = list_begin(&list_buffer_head); e != list_end(&list_buffer_head); 
+  //                                                         e = list_next(e))
+  //   {
+  //       buf_head = list_entry(e, struct buffer_head, elem);
+  //       if(buf_head->dirty)
+  //       {
+  //         block_write (fs_device, buf_head->on_disk_loc, buf_head->data);
+  //       }
+  //   }
+  // }
 }
 
 /* Returns true if LOOPS iterations waits for more than one timer
