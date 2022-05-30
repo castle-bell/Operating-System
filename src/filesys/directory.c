@@ -6,13 +6,6 @@
 #include "filesys/inode.h"
 #include "threads/malloc.h"
 
-/* Creates a directory with space for ENTRY_CNT entries in the
-   given SECTOR.  Returns true if successful, false on failure. */
-bool
-dir_create (block_sector_t sector, size_t entry_cnt)
-{
-  return inode_create (sector, entry_cnt * sizeof (struct dir_entry), 1);
-}
 
 /* Opens and returns the directory for the given INODE, of which
    it takes ownership.  Returns a null pointer on failure. */
@@ -163,6 +156,28 @@ dir_add (struct dir *dir, const char *name, block_sector_t inode_sector)
   return success;
 }
 
+/* Creates a directory with space for ENTRY_CNT entries in the
+   given SECTOR.  Returns true if successful, false on failure. */
+bool
+dir_create (block_sector_t sector, size_t entry_cnt, block_sector_t parent)
+{
+  bool success;
+  struct dir *dir;
+  struct inode *inode;
+
+  success = inode_create (sector, entry_cnt * sizeof (struct dir_entry), 1);
+
+  inode = inode_open(sector);
+  dir = dir_open(inode);
+  if(dir == NULL)
+    return false;
+
+  success = success && dir_add(dir, ".", sector) && dir_add(dir, "..", parent);
+  dir_close(dir);
+
+  return success;
+}
+
 /* Removes any entry for NAME in DIR.
    Returns true if successful, false on failure,
    which occurs only if there is no file with the given NAME. */
@@ -211,6 +226,9 @@ dir_readdir (struct dir *dir, char name[NAME_MAX + 1])
   while (inode_read_at (dir->inode, &e, sizeof e, dir->pos) == sizeof e) 
     {
       dir->pos += sizeof e;
+      if(strcmp(e.name, ".") == 0 || strcmp(e.name, "..") == 0)
+        continue;
+        
       if (e.in_use)
         {
           strlcpy (name, e.name, NAME_MAX + 1);
@@ -229,6 +247,9 @@ bool dir_isempty(struct dir *dir)
   for (ofs = 0; inode_read_at (dir->inode, &e, sizeof e, ofs) == sizeof e;
        ofs += sizeof e) 
   {
+    if(strcmp(e.name, ".") == 0 || strcmp(e.name, "..") == 0)
+      continue;
+
     if(e.in_use)
       return false;
   }

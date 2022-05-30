@@ -46,14 +46,18 @@ bool free_map_alloc (size_t sectors, struct inode_disk *inode_disk)
   block_sector_t pos = inode_disk->pos;
   block_sector_t level = 0;
   block_sector_t two_lev = 0;
-  block_sector_t prev_two_lev = 0;
+  block_sector_t prev_two_lev = -1;
   block_sector_t idx = 0;
   block_sector_t start;
 
   struct index_disk *indirect_index;
   indirect_index = (struct index_disk *)calloc(1, sizeof(struct index_disk));
+  block_read(fs_device, inode_disk->indirect_block_sec, indirect_index);
+
   struct index_disk *double_index;
   double_index = (struct index_disk *)calloc(1, sizeof(struct index_disk));
+  block_read(fs_device, inode_disk->double_indirect_block_sec, double_index);
+
   struct index_disk *double_entry;
   double_entry = (struct index_disk *)calloc(1, sizeof(struct index_disk));
 
@@ -63,7 +67,6 @@ bool free_map_alloc (size_t sectors, struct inode_disk *inode_disk)
   {
     while(!free_map_allocate(sec, &start))
     {
-      printf("create expanded\n");
       if(sec == 0)
       {
         ASSERT(0);
@@ -86,15 +89,20 @@ bool free_map_alloc (size_t sectors, struct inode_disk *inode_disk)
       {
         if(prev_two_lev != two_lev)
         {
-          free_map_allocate(1, &double_index->direct_map_table[prev_two_lev]);
+          if(prev_two_lev == -1)
+            prev_two_lev = 0;
+          free_map_allocate(1, &double_index->direct_map_table[two_lev]);
           block_write(fs_device, double_index->
                       direct_map_table[prev_two_lev], double_entry);
           memset(double_entry, 0, sizeof(struct index_disk));
           prev_two_lev = two_lev;
         }
+
+        if(double_entry->direct_map_table[0] == 0)
+          block_read(fs_device, double_index->direct_map_table[two_lev], double_entry);
+
         double_entry->direct_map_table[idx] = start + i;
       }
-      // printf("level: %d, two_lev: %d, idx: %d, sec: %d\n", level, two_lev, idx, inode_disk->start + i);
       pos ++;
     }
   }

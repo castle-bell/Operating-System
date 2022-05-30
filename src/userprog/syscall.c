@@ -291,7 +291,7 @@ int sys_write(int fd, const void *buffer, unsigned size)
   else
   {
     file = cur->fdt[fd];
-    if(file == NULL)
+    if(file == NULL || file->inode->data.is_directory)
     {
       lock_release(&filesys_lock);
       return -1;
@@ -526,12 +526,14 @@ bool sys_mkdir(const char *dir)
   if(!free_map_allocate(1, &sector))
   {
     lock_release(&filesys_lock);
+    dir_close(cur_dir);
     return false;
   }
 
   ASSERT(cur_dir);
 
-  create = dir_create(sector,16) && dir_add(cur_dir,name,sector);
+  create = dir_create(sector,16, cur_dir->inode->sector) 
+            && dir_add(cur_dir,name,sector);
 
   if(create == false)
   {
@@ -556,6 +558,7 @@ bool sys_chdir(const char *dir)
   if(!dir_lookup(cur_dir, name, &inode))
   {
     lock_release(&filesys_lock);
+    dir_close(cur_dir);
     return false;
   }
 
@@ -573,42 +576,32 @@ bool sys_readdir(int fd, char *name)
 {
   lock_acquire(&filesys_lock);
 
-  // if(fd < 3 || fd > 127)
-  // {
-  //   lock_release(&filesys_lock);
-  //   return false;
-  // }
+  if(fd < 3 || fd > 127)
+  {
+    lock_release(&filesys_lock);
+    return false;
+  }
 
-  // struct file* file;
-  // struct thread* cur = thread_current();
+  struct file* file;
+  struct thread* cur = thread_current();
 
-  // /* Check range of fd */
-  // file = cur->fdt[fd];
+  /* Check range of fd */
+  file = cur->fdt[fd];
 
-  // if((file == NULL) || (file->inode->data.is_directory == false))
-  // {
-  //   lock_release(&filesys_lock);
-  //   return false;
-  // }
+  if((file == NULL) || (file->inode->data.is_directory == false))
+  {
+    lock_release(&filesys_lock);
+    return false;
+  }
 
 
-  // struct dir *dir = dir_open(file->inode);
+  struct dir *dir = dir_open(file->inode);
 
-  // struct dir_entry e;
-  // size_t ofs;
+  bool success = dir_readdir(dir, name);
 
-  // for(ofs = 0; inode_read_at(dir->inode, &e, sizeof e, ofs) == sizeof e;
-  //     ofs += sizeof e)
-  // {
-  //   if(e.in_use)
-  //   {
-
-  //   }
-  // }
-
-  return true;
-
+  dir_close(dir);
   lock_release(&filesys_lock);
+  return success;
 }
 
 bool sys_isdir(int fd)
@@ -664,6 +657,8 @@ int sys_inumber(int fd)
     lock_release(&filesys_lock);
     return -1;
   }
+
+  lock_release(&filesys_lock);
   return file->inode->sector;
 
 }

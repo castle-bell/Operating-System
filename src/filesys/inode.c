@@ -28,8 +28,6 @@ static block_sector_t
 byte_to_sector (const struct inode *inode, off_t pos) 
 {
   ASSERT (inode != NULL);
-  // if (pos < DIRECT_BLOCK_ENTRIES*DIRECT_BLOCK_ENTRIES + 
-  //                                  2*(DIRECT_BLOCK_ENTRIES)- 4 - 1)
   if(pos < inode->data.length)
     // return inode->data.direct_map_table[pos / BLOCK_SECTOR_SIZE];
     return idx_to_sector(&(inode->data), pos / BLOCK_SECTOR_SIZE);
@@ -164,10 +162,10 @@ inode_close (struct inode *inode)
       if (inode->removed) 
         {
           free_map_release (inode->sector, 1);
-          // for(int i = 0; i<inode->data.pos; i++)
-          // {
-          //   free_map_release(idx_to_sector(&inode->data, inode->data.pos), 1);
-          // }
+          for(int i = 0; i<inode->data.pos; i++)
+          {
+            free_map_release(idx_to_sector(&inode->data, inode->data.pos), 1);
+          }
           // free_map_release (inode->data.start,
           //                   bytes_to_sectors (inode->data.length)); 
         }
@@ -193,7 +191,6 @@ inode_read_at (struct inode *inode, void *buffer_, off_t size, off_t offset)
 {
   uint8_t *buffer = buffer_;
   off_t bytes_read = 0;
-  uint8_t *bounce = NULL;
   while (size > 0) 
     {
       /* Disk sector to read, starting byte offset within sector. */
@@ -237,7 +234,6 @@ inode_read_at (struct inode *inode, void *buffer_, off_t size, off_t offset)
       offset += chunk_size;
       bytes_read += chunk_size;
     }
-  free (bounce);
   return bytes_read;
 }
 
@@ -270,7 +266,6 @@ inode_write_at (struct inode *inode, const void *buffer_, off_t size,
       int add_sec = (add_len)/BLOCK_SECTOR_SIZE + 1;
       int old_pos = disk_inode->pos;
       free_map_alloc(add_sec, disk_inode);
-
 
       /* Fill the allocated blocks with zero */
       for(int num = 0; num < disk_inode->pos - old_pos; num ++)

@@ -85,6 +85,17 @@ void path_parsing(char *argument[], int* count, char* path)
    (Path should be absolute path) */
 char *check_path_validity(char *path, struct dir **dir)
 {
+
+  /* Handle corner case */
+  if(strcmp(path, "") == 0)
+    return NULL;
+  
+  if(strcmp(path,"/") == 0)
+  {
+    *dir = dir_open_root();
+    return path;
+  }
+
   char *argument[100];
   int count = 0;
   bool absolute;
@@ -155,7 +166,20 @@ filesys_done (void)
   /* Write all buffer cache */
   write_all_dirty(&list_buffer_head);
 
+  /* Free the all memory */
+  struct list_elem *e;
+  struct buffer_head *buf_head;
+
   free_map_close ();
+
+  for(e = list_begin(&list_buffer_head); e != list_end(&list_buffer_head); e = list_next(e))
+  {
+      buf_head = list_entry(e, struct buffer_head, elem);
+      if(lock_held_by_current_thread(&buf_head->buffer_lock))
+        lock_release(&buf_head->buffer_lock);
+      // free(buf_head);
+  }
+
 }
 
 /* Creates a file named NAME with the given INITIAL_SIZE.
@@ -189,11 +213,21 @@ filesys_create (const char *name, off_t initial_size)
 struct file *
 filesys_open (const char *name)
 {
+  if(strcmp(name, ".") == 0 || strcmp(name, "..") == 0)
+    return NULL;
+
   struct dir *dir;
   char *path_name = check_path_validity(name, &dir);
   if(path_name == NULL)
     return NULL;
   struct inode *inode = NULL;
+
+  /* If name == "/" */
+  if(strcmp(name, "/") == 0)
+  {
+    dir_close (dir);
+    return file_open (dir->inode);
+  }
 
   if (dir != NULL)
     dir_lookup (dir, path_name, &inode);
@@ -216,12 +250,23 @@ filesys_remove (const char *name)
     return false;
 
   /* Check whether regular file or directory */
-  struct inode *inode = NULL;
-  if(!dir_lookup(dir, path_name, &inode));
+  struct inode *inode;
+  bool check = dir_lookup(dir, path_name, &inode);
+  if(check == false)
+  {
+    dir_close(dir);
     return false;
+  }
 
   if(inode->data.is_directory)
   {
+    /* Should not remove ".", ".." entries */
+    if(strcmp(name, ".") == 0 || strcmp(name, "..") == 0)
+    {
+      dir_close(dir);
+      return false;
+    }
+
     struct dir *remove = dir_open(inode);
     /* Check that the dir is empty */
     if(!dir_isempty(remove))
@@ -239,7 +284,8 @@ filesys_remove (const char *name)
   }
   else
     success = dir != NULL && dir_remove (dir, path_name);
-
+  // struct dir *dir = dir_open_root ();
+  // bool success = dir != NULL && dir_remove (dir, name);
   dir_close (dir); 
 
   return success;
@@ -251,7 +297,7 @@ do_format (void)
 {
   printf ("Formatting file system...");
   free_map_create ();
-  if (!dir_create (ROOT_DIR_SECTOR, 16))
+  if (!dir_create (ROOT_DIR_SECTOR, 16, ROOT_DIR_SECTOR))
     PANIC ("root directory creation failed");
   free_map_close ();
   printf ("done.\n");
