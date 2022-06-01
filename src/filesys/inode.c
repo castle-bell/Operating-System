@@ -122,6 +122,7 @@ inode_open (block_sector_t sector)
   inode->open_cnt = 1;
   inode->deny_write_cnt = 0;
   inode->removed = false;
+  inode->dir_pos = 0;
   block_read (fs_device, inode->sector, &inode->data);
   return inode;
 }
@@ -164,10 +165,8 @@ inode_close (struct inode *inode)
           free_map_release (inode->sector, 1);
           for(int i = 0; i<inode->data.pos; i++)
           {
-            free_map_release(idx_to_sector(&inode->data, inode->data.pos), 1);
+            free_map_release(idx_to_sector(&inode->data, i), 1);
           }
-          // free_map_release (inode->data.start,
-          //                   bytes_to_sectors (inode->data.length)); 
         }
 
       free (inode); 
@@ -265,7 +264,8 @@ inode_write_at (struct inode *inode, const void *buffer_, off_t size,
     {
       int add_sec = (add_len)/BLOCK_SECTOR_SIZE + 1;
       int old_pos = disk_inode->pos;
-      free_map_alloc(add_sec, disk_inode);
+      if(!free_map_alloc(add_sec, disk_inode))
+        return -1;
 
       /* Fill the allocated blocks with zero */
       for(int num = 0; num < disk_inode->pos - old_pos; num ++)

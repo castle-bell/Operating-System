@@ -6,6 +6,7 @@
 #include <stdint.h>
 #include "./synch.h"
 #include "../filesys/file.h"
+#include "../filesys/directory.h"
 #include "../lib/kernel/hash.h"
 #include "../lib/kernel/bitmap.h"
 
@@ -192,5 +193,7 @@ int thread_get_nice (void);
 void thread_set_nice (int);
 int thread_get_recent_cpu (void);
 int thread_get_load_avg (void);
+
+bool dir_is_used(struct dir *dir);
 
 #endif /* threads/thread.h */

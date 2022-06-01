@@ -79,10 +79,10 @@ struct buffer_head *handler_cache_miss(block_sector_t sector_idx)
         struct buffer_head *victim = select_victim_entry(&list_buffer_head);
         ASSERT(!victim->accessed);
 
+        lock_acquire(&victim->buffer_lock);
+
         if(victim->dirty)
             write_dirty(victim);
-
-        lock_acquire(&victim->buffer_lock);
 
         memset(victim->data, 0, BLOCK_SECTOR_SIZE);
         victim->is_used = false;
@@ -110,15 +110,7 @@ void write_dirty(struct buffer_head *buf_head)
 {
     ASSERT(buf_head->dirty);
 
-
-    lock_acquire(&buf_head->buffer_lock);
-
     block_write (fs_device, buf_head->on_disk_loc, buf_head->data);
-
-
-    lock_release(&buf_head->buffer_lock);
-
-
     buf_head->dirty = false;
 }
 
@@ -130,7 +122,11 @@ void write_all_dirty(struct list *list)
     for(e = list_begin(list); e != list_end(list); e = list_next(e))
     {
         buf_head = list_entry(e, struct buffer_head, elem);
+        lock_acquire(&buf_head->buffer_lock);
+        
         if(buf_head->dirty)
             write_dirty(buf_head);
+
+        lock_release(&buf_head->buffer_lock);
     }
 }

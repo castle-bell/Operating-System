@@ -595,7 +595,7 @@ bool sys_readdir(int fd, char *name)
   }
 
 
-  struct dir *dir = dir_open(file->inode);
+  struct dir *dir = dir_open(inode_reopen(file->inode));
 
   bool success = dir_readdir(dir, name);
 

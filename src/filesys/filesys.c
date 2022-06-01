@@ -93,7 +93,7 @@ char *check_path_validity(char *path, struct dir **dir)
   if(strcmp(path,"/") == 0)
   {
     *dir = dir_open_root();
-    return path;
+    return ".";
   }
 
   char *argument[100];
@@ -165,21 +165,20 @@ filesys_done (void)
 {
   /* Write all buffer cache */
   write_all_dirty(&list_buffer_head);
-
-  /* Free the all memory */
   struct list_elem *e;
   struct buffer_head *buf_head;
 
-  free_map_close ();
-
-  for(e = list_begin(&list_buffer_head); e != list_end(&list_buffer_head); e = list_next(e))
+  for(e = list_begin(&list_buffer_head); e != list_end(&list_buffer_head); e)
   {
       buf_head = list_entry(e, struct buffer_head, elem);
       if(lock_held_by_current_thread(&buf_head->buffer_lock))
         lock_release(&buf_head->buffer_lock);
-      // free(buf_head);
+      e = list_next(e);
+      free(buf_head);
   }
+  free(buffer_cache);
 
+  free_map_close ();
 }
 
 /* Creates a file named NAME with the given INITIAL_SIZE.
@@ -213,9 +212,6 @@ filesys_create (const char *name, off_t initial_size)
 struct file *
 filesys_open (const char *name)
 {
-  if(strcmp(name, ".") == 0 || strcmp(name, "..") == 0)
-    return NULL;
-
   struct dir *dir;
   char *path_name = check_path_validity(name, &dir);
   if(path_name == NULL)
@@ -266,18 +262,28 @@ filesys_remove (const char *name)
       dir_close(dir);
       return false;
     }
-
     struct dir *remove = dir_open(inode);
+
+    /* Check there is no threads which current directory is dir */
+    if(dir_is_used(remove) || remove->inode->open_cnt != 1)
+    {
+      dir_close(remove);
+      dir_close(dir);
+      return false;
+    }
+
     /* Check that the dir is empty */
     if(!dir_isempty(remove))
     {
       dir_close(remove);
+      dir_close(dir);
       return false;
     }
     else
     {
       dir_close(remove);
       dir_remove(dir, path_name);
+      dir_close(dir);
       return true;
     }
 

@@ -30,6 +30,7 @@ struct index_disk
 /* In-memory inode. */
 struct inode 
   {
+    off_t dir_pos;                      /* Not use when the file is regular file */
     struct list_elem elem;              /* Element in inode list. */
     block_sector_t sector;              /* Sector number of disk location. */
     int open_cnt;                       /* Number of openers. */

@@ -650,6 +650,23 @@ allocate_tid (void)
 
   return tid;
 }
+
+bool dir_is_used(struct dir *dir)
+{
+  /* Check the all threads */
+  struct list_elem *e;
+  block_sector_t cd = dir->inode->sector;
+
+  for(e = list_begin(&all_list); e != list_end(&all_list); e = list_next(e))
+  {
+    struct thread *t = list_entry(e, struct thread, allelem);
+    if(t->cd == cd)
+      return true;
+  }
+
+  return false;
+}
+
 
 /* Offset of `stack' member within `struct thread'.
    Used by switch.S, which can't figure it out on its own. */
