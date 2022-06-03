@@ -565,6 +565,8 @@ bool sys_chdir(const char *dir)
   /* Set the current thread inode->sector */
   struct thread *cur = thread_current();
   cur->cd = inode->sector;
+  
+  inode_close(inode);
   dir_close(cur_dir);
 
   lock_release(&filesys_lock);

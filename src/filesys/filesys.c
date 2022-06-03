@@ -253,13 +253,15 @@ filesys_remove (const char *name)
 
   if(inode->data.is_directory)
   {
+    struct dir *remove = dir_open(inode);
+    
     /* Should not remove ".", ".." entries */
     if(strcmp(name, ".") == 0 || strcmp(name, "..") == 0)
-    {
+    { 
+      dir_close(remove);
       dir_close(dir);
       return false;
     }
-    struct dir *remove = dir_open(inode);
 
     /* Check there is no threads which current directory is dir */
     if(dir_is_used(remove) || remove->inode->open_cnt != 1)
@@ -278,8 +280,8 @@ filesys_remove (const char *name)
     }
     else
     {
-      dir_close(remove);
       dir_remove(dir, path_name);
+      dir_close(remove);
       dir_close(dir);
       return true;
     }
