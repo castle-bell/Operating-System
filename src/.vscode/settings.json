@@ -19,6 +19,15 @@
         "*.tcc": "c",
         "fstream": "c",
         "directory.h": "c",
-        "malloc.h": "c"
+        "malloc.h": "c",
+        "exception": "c",
+        "iosfwd": "c",
+        "new": "c",
+        "ostream": "c",
+        "sstream": "c",
+        "streambuf": "c",
+        "array": "c",
+        "initializer_list": "c",
+        "utility": "c"
     }
 }

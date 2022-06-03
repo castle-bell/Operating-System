@@ -173,6 +173,7 @@ timer_interrupt (struct intr_frame *args UNUSED)
 {
   ticks++;
   timer_ticks();
+  thread_tick();
   /* Write all dirty cache in every 5 secs */
   // if(timer_ticks () % (5*TIMER_FREQ) == 0)
   // {

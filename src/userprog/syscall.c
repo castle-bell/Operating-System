@@ -525,8 +525,8 @@ bool sys_mkdir(const char *dir)
   block_sector_t sector;
   if(!free_map_allocate(1, &sector))
   {
-    lock_release(&filesys_lock);
     dir_close(cur_dir);
+    lock_release(&filesys_lock);
     return false;
   }
 
@@ -557,8 +557,8 @@ bool sys_chdir(const char *dir)
   const char *name = check_path_validity(dir, &cur_dir);
   if(!dir_lookup(cur_dir, name, &inode))
   {
-    lock_release(&filesys_lock);
     dir_close(cur_dir);
+    lock_release(&filesys_lock);
     return false;
   }
 

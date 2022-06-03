@@ -218,15 +218,12 @@ filesys_open (const char *name)
     return NULL;
   struct inode *inode = NULL;
 
-  /* If name == "/" */
-  if(strcmp(name, "/") == 0)
-  {
-    dir_close (dir);
-    return file_open (dir->inode);
-  }
-
   if (dir != NULL)
-    dir_lookup (dir, path_name, &inode);
+    if(!dir_lookup (dir, path_name, &inode))
+    {
+      dir_close(dir);
+      return NULL;
+    }
   dir_close (dir);
   return file_open (inode);
 }
