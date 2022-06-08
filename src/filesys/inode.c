@@ -423,3 +423,33 @@ block_sector_t idx_to_sector (const struct inode_disk *inode, block_sector_t idx
     return index.direct_map_table[pos];
   }
 }
+
+struct dentry_cache *find_cache(struct hash *h, const char* name)
+{
+  struct dentry_cache *cache = (struct dentry_cache *)malloc(sizeof(struct dentry_cache));
+  cache->name = name;
+
+  struct hash_elem *find = hash_find(h, &cache->elem);
+  free(cache);
+  if(find == NULL)
+    return NULL;
+
+  return hash_entry(find, struct dentry_cache, elem);
+
+}
+
+struct dentry_cache *make_cache(block_sector_t inode_sector, const char * name)
+{
+  int len = strlen(name);
+
+  struct dentry_cache *cache = (struct dentry_cache *)calloc(sizeof(struct dentry_cache), 1);
+  char *cache_name = (char *)calloc(len + 1, 1);
+
+  for(int i = 0; i<len; i++)
+    cache_name[i] = name[i];
+  cache_name[len] = '\0';
+
+  cache->name = cache_name;
+  cache->sector = inode_sector;
+  return cache;
+}

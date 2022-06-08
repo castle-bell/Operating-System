@@ -1,0 +1,294 @@
+       	       	     +-------------------------+
+		     |		CS 140	       |
+		     | PROJECT 4: FILE SYSTEMS |
+		     |	   DESIGN DOCUMENT     |
+		     +-------------------------+
+
+---- GROUP ----
+
+>> Fill in the names and email addresses of your group members.
+
+Seongjong Park <jilisalang@kaist.ac.kr>
+
+---- PRELIMINARIES ----
+
+>> If you have any preliminary comments on your submission, notes for the
+>> TAs, or extra credit, please give them here.
+
+VM이 가능하게 했고, extra credit인 dentry cache를 구현했습니다.
+
+>> Please cite any offline or online sources you consulted while
+>> preparing your submission, other than the Pintos documentation, course
+>> text, lecture notes, and course staff.
+
+OSlab에 있는 렉쳐만 참고했습니다.
+
+		     INDEXED AND EXTENSIBLE FILES
+		     ============================
+
+---- DATA STRUCTURES ----
+
+>> A1: Copy here the declaration of each new or changed `struct' or
+>> `struct' member, global or static variable, `typedef', or
+>> enumeration.  Identify the purpose of each in 25 words or less.
+
+/* On-disk inode.
+   Must be exactly BLOCK_SECTOR_SIZE bytes long. */
+struct inode_disk
+  {
+    /* Data structure for Indexed and Extensible files */
+    unsigned is_directory;              /* Flag */
+    block_sector_t pos;                 /* Current # of sectors */
+    off_t length;                       /* File size in bytes. */
+    unsigned magic;                     /* Magic number. */
+    block_sector_t direct_map_table[DIRECT_BLOCK_ENTRIES - 6];
+    block_sector_t indirect_block_sec;
+    block_sector_t double_indirect_block_sec;
+  };
+
+설명은 옆에 달려있는 주석과 동일하고 linear assignment에서 indexed block assignment
+의 구현을 위해 direct_map_table, indirect_block_sec, double_indirect_block_sec element
+를 추가했습니다.
+
+>> A2: What is the maximum size of a file supported by your inode
+>> structure?  Show your work.
+
+Level 0 = 122 sectors * 512 bytes per sectors
+Level 1 = 1 indirect block * 128 sectors * 512 bytes per sectors
+Level 2 = 1 double in direct block * 128 indirect block * 128 sectors * 512 bytes per sectors
+
+총합 = 128(512+128*512) + 122*512 = 8516608 bytes
+
+---- SYNCHRONIZATION ----
+
+>> A3: Explain how your code avoids a race if two processes attempt to
+>> extend a file at the same time.
+
+섹터에 대해 특정 process가 요청이 들어오면 파일의 다른 섹터에 대해서는 atomic
+하게 작동할 필요가 없지만 같은 하나의 섹터에 대해서는 두 개의 process가 동시에
+write를 진행할 수 없으므로 섹터를 관리하는 bitmap과 그 cache에 lock을 추가해서
+동시에 2개 이상의 process가 하나의 섹터에 접근하지 못하도록 막고 atomic하게 진
+행하도록 했습니다.
+
+>> A4: Suppose processes A and B both have file F open, both
+>> positioned at end-of-file.  If A reads and B writes F at the same
+>> time, A may read all, part, or none of what B writes.  However, A
+>> may not read data other than what B writes, e.g. if B writes
+>> nonzero data, A is not allowed to see all zeros.  Explain how your
+>> code avoids this race.
+
+파일 extension을 진행한 후에 length field를 바로 초기화해줘서 A는 B가 쓴
+어떠한 data도 볼 수 없게 하고 섹터 자체를 lock으로 구별지어 놔서 B가 writing
+이 끝난 후에나 file을 read할 수 있습니다. 
+
+>> A5: Explain how your synchronization design provides "fairness".
+>> File access is "fair" if readers cannot indefinitely block writers
+>> or vice versa.  That is, many processes reading from a file cannot
+>> prevent forever another process from writing the file, and many
+>> processes writing to a file cannot prevent another process forever
+>> from reading the file.
+
+synchronization에서는 writer가 특정 시간을 기다리다가 그때까지도 writer가
+그 파일을 쓰지 못하면 모든 reader가 read를 종료하기를 기다렸다가 뒤에 오는
+reader를 막고 write을 진행하도록 했습니다.
+
+---- RATIONALE ----
+
+>> A6: Is your inode structure a multilevel index?  If so, why did you
+>> choose this particular combination of direct, indirect, and doubly
+>> indirect blocks?  If not, why did you choose an alternative inode
+>> structure, and what advantages and disadvantages does your
+>> structure have, compared to a multilevel index?
+
+inode structure는 multilevel index를 지원합니다. 이 방식을 사용한 이유는
+file extension을 위해서는 연속된 블락을 할당하는게 아니라 남아 있는 블락을
+할당하고 그 위치를 기억해야 하므로 index structure를 이용했고 doubly indirect
+block을 도입한 이유는 file의 최대 사이즈가 8MB가 되어야 했기 때문에 doubly
+indirect block을 통해 이를 만족시켜줄 수 있었습니다.
+
+			    SUBDIRECTORIES
+			    ==============
+
+---- DATA STRUCTURES ----
+
+>> B1: Copy here the declaration of each new or changed `struct' or
+>> `struct' member, global or static variable, `typedef', or
+>> enumeration.  Identify the purpose of each in 25 words or less.
+
+struct dir 
+  {
+    struct inode *inode;                /* Backing store. */
+    off_t pos;                          /* Current position. */
+  };
+
+위의 구조가 in memory directory 구조이고 inode는 dir의 inode, pos는 
+directory entry를 읽어야 될 부분을 기록했습니다.
+
+/* A single directory entry. */
+struct dir_entry 
+  {
+    block_sector_t inode_sector;        /* Sector number of header. */
+    char name[NAME_MAX + 1];            /* Null terminated file name. */
+    bool in_use;                        /* In use or free? */
+  };
+
+위의 구조는 struct dir의 entry로 각 directory 안의 file의 inode의 sector
+number, name, 사용 유무를 저장합니다.
+
+
+struct thread의 block_sector_t cd; 추가 /* current directory의 sector 
+										  number를 저장 */
+
+---- ALGORITHMS ----
+
+>> B2: Describe your code for traversing a user-specified path.  How
+>> do traversals of absolute and relative paths differ?
+
+absolute path의 경우에는 parsing 후 directory를 하나씩 들어가면서 탐색
+하고 있으면 그 directory 내에서 다시 parsing한 부분을 찾는것을 재귀적으로
+탐색합니다. 만약 없으면 종료하고 relative path의 경우에는 struct thread
+에 저장해놓은 block sector number를 이용해 현재 current directory를 열
+고 거기서부터 탐색을 시작했습니다. 
+
+
+---- SYNCHRONIZATION ----
+
+>> B4: How do you prevent races on directory entries?  For example,
+>> only one of two simultaneous attempts to remove a single file
+>> should succeed, as should only one of two simultaneous attempts to
+>> create a file with the same name, and so on.
+
+directory entry를 얻는 것도 결국에는 block에서 읽어와야 하는데 추후에
+설명할 buffer cache에서 모든 읽기와 쓰기가 이루어지는데 buffer cache에서
+동일한 sector에 대한 접근은 lock으로 막아놨기 때문에 race condition
+이 발생하지 않습니다.
+
+>> B5: Does your implementation allow a directory to be removed if it
+>> is open by a process or if it is in use as a process's current
+>> working directory?  If so, what happens to that process's future
+>> file system operations?  If not, how do you prevent it?
+
+process에 대해 open 되어 있거나 어떤 프로세스의 current working directory
+로 사용되고 있을 경우 directory의 삭제는 불가능하게 설계했습니다. 삭제시
+all thread를 탐색해서 동일한 current directory 값을 갖는 thread가 존재하면
+불가능하게 했습니다. 
+
+---- RATIONALE ----
+
+>> B6: Explain why you chose to represent the current directory of a
+>> process the way you did.
+
+block sector number를 저장한 이유는 directory를 대신 열어두어서 memory
+를 낭비하거나 close 되어 inode data가 날아가는 경우를 방지하기 위해서 
+아예 block sector number를 저장했습니다. 
+
+			     BUFFER CACHE
+			     ============
+
+---- DATA STRUCTURES ----
+
+>> C1: Copy here the declaration of each new or changed `struct' or
+>> `struct' member, global or static variable, `typedef', or
+>> enumeration.  Identify the purpose of each in 25 words or less.
+
+/* Define data structure for buffer cache */
+struct buffer_head
+{
+    int idx;
+    
+    bool is_used; /* Used flag */
+    bool dirty; /* Dirty flag */
+    bool accessed; /* Accessed flag */
+    block_sector_t on_disk_loc; /* On-disk location */
+    void *data; /* Virtual address of buffer cache entry */
+
+    struct lock buffer_lock; /* Lock for accessing buffer_head */
+    struct list_elem elem;
+};
+
+char *buffer_cache;
+struct list list_buffer_head;
+
+struct list_elem* cache_clock;
+
+위와 같은 buffer cache 구조체를 이용했습니다. 이를 저장하는 list는  struct
+list_buffer_head이고 이에 연결된 data list는 buffer cache에 저장했습니다.
+
+
+---- ALGORITHMS ----
+
+>> C2: Describe how your cache replacement algorithm chooses a cache
+>> block to evict.
+
+LFS 알고리즘을 사용해 clock을 돌리고 accessed 한 적이 없는 block을 우선 순위
+로 하여 victim 했습니다.
+
+>> C3: Describe your implementation of write-behind.
+
+write behind는 만약 victim 된 block의 write 값이 true일 경우 해당 block
+sector에 값들을 저장하고 filesys_done이 호출되는 끝나는 상황에서는 모든
+bufferhead cache들에 저장된 값들을 block에 저장했습니다.
+
+>> C4: Describe your implementation of read-ahead.
+
+read ahead는 buffer_head의 값을 참조하여 cache hit하면 block에서 직접
+읽지 않고 buffer_head와 연관된 char *buffer_cache에서 값들을 읽어오는
+방식으로 진행했습니다.
+
+---- SYNCHRONIZATION ----
+
+>> C5: When one process is actively reading or writing data in a
+>> buffer cache block, how are other processes prevented from evicting
+>> that block?
+
+buffer_head의 구조체에 element로 있는 각각의 lock들이 모든 process가 접근
+할 때 lock을 얻고 접근이 끝나고 사용을 종료하면 lock을 해제함으로써 사용
+중인 buffer cache block에 접근하지 못하도록 구현했습니다. evicting 시에도 
+마찬가지로 block에 대한 lock을 얻어야 해 race condition이 일어나지 않습니다.
+
+>> C6: During the eviction of a block from the cache, how are other
+>> processes prevented from attempting to access the block?
+
+C5 와 마찬가지로 eviction을 진행하는 도중에도 lock을 소유하고 있는 process
+만이 그 eviction 에 선택된 block에 접근할 수 있고 이를 통해 다른 process들이
+eviction이 진행중인 block에 대한 소유권을 얻는 것을 막았습니다. 
+
+---- RATIONALE ----
+
+>> C7: Describe a file workload likely to benefit from buffer caching,
+>> and workloads likely to benefit from read-ahead and write-behind.
+
+buffering cache를 구현함으로써 file read나 write 시에 항상 block을 참
+조하지 않고 buffer cache를 먼저 탐색함으로써 idle_thread가 돌아가는 시간을
+최소하 하도록 했습니다. 
+
+			   SURVEY QUESTIONS
+			   ================
+
+Answering these questions is optional, but it will help us improve the
+course in future quarters.  Feel free to tell us anything you
+want--these questions are just to spur your thoughts.  You may also
+choose to respond anonymously in the course evaluations at the end of
+the quarter.
+
+>> In your opinion, was this assignment, or any one of the three problems
+>> in it, too easy or too hard?  Did it take too long or too little time?
+
+꽤 어려웠지만, 렉쳐노트를 참고하며 따라가니까 할만했던 것 같습니다. 시간적으로는
+디버깅을 하는데 시간은 꽤 걸렸지만 구조체 설정 및 구현에는 적당한 시간을 할애했
+습니다.
+
+>> Did you find that working on a particular part of the assignment gave
+>> you greater insight into some aspect of OS design?
+
+이 과제의 모든 부분이 file system의 작동 방식에 대해 insight를 주었습니다.
+
+
+>> Is there some particular fact or hint we should give students in
+>> future quarters to help them solve the problems?  Conversely, did you
+>> find any of our guidance to be misleading?
+
+>> Do you have any suggestions for the TAs to more effectively assist
+>> students in future quarters?
+
+>> Any other comments?

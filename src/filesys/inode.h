@@ -5,7 +5,7 @@
 #include "filesys/off_t.h"
 #include "devices/block.h"
 #include "../threads/synch.h"
-
+#include "../lib/kernel/hash.h"
 #define DIRECT_BLOCK_ENTRIES 128
 
 /* On-disk inode.
@@ -27,6 +27,13 @@ struct index_disk
     block_sector_t direct_map_table[DIRECT_BLOCK_ENTRIES];
 };
 
+struct dentry_cache
+{
+  block_sector_t sector;
+  char * name;
+  struct hash_elem elem;
+};
+
 /* In-memory inode. */
 struct inode 
   {
@@ -43,6 +50,7 @@ struct inode
 
 struct bitmap;
 struct lock extension_lock;
+struct hash dentry_cache;
 
 void inode_init (void);
 bool inode_create (block_sector_t, off_t, unsigned);
@@ -56,6 +64,9 @@ off_t inode_write_at (struct inode *, const void *, off_t size, off_t offset);
 void inode_deny_write (struct inode *);
 void inode_allow_write (struct inode *);
 off_t inode_length (const struct inode *);
+struct dentry_cache *find_cache(struct hash *h, const char* name);
+struct dentry_cache *make_cache(block_sector_t inode_sector, const char * name);
+
 
 block_sector_t get_pos(block_sector_t pos, block_sector_t *level, block_sector_t *two_lev);
 block_sector_t idx_to_sector (const struct inode_disk *inode, block_sector_t idx);

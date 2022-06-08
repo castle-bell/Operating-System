@@ -9,11 +9,14 @@
 #include "filesys/cache.h"
 #include "../threads/malloc.h"
 #include "../threads/thread.h"
+#include "../lib/kernel/hash.h"
 
 /* Partition that contains the file system. */
 struct block *fs_device;
 
 static void do_format (void);
+static unsigned dentry_hash_func(const struct hash_elem *e, void *aux UNUSED);
+static bool dentry_less_func(const struct hash_elem *a, const struct hash_elem *b, void *aux UNUSED);
 
 /* Initializes the buffer_head */
 void buffer_head_init (void)
@@ -71,7 +74,7 @@ void path_parsing(char *argument[], int* count, char* path)
   char *ptr = strtok_r(path,"/",&save_ptr);
   while(1)
   {
-    if((ptr == NULL) || i >= 100)
+    if((ptr == NULL) || i >= 250)
       break;
     argument[i] = ptr;
     i++;
@@ -96,7 +99,7 @@ char *check_path_validity(char *path, struct dir **dir)
     return ".";
   }
 
-  char *argument[100];
+  char *argument[250];
   int count = 0;
   bool absolute;
 
@@ -113,25 +116,56 @@ char *check_path_validity(char *path, struct dir **dir)
 
   path_parsing(argument, &count, copy);
 
-  struct dir *search;
-  struct inode *inode;
-  if(absolute == true)
-    search = dir_open_root();
-  else
-    search = dir_open(inode_open(thread_current()->cd));
-
-  /* Check the validity of path */
-  /* 0~i-1 element should be already existed */
-  for(int i = 0; i < count - 1; i++)
+  /* Check dentry cache */
+  bool find = false;
+  bool copy_success = false;
+  struct dentry_cache *cache;
+  char copy_dentry[strlen(path) + 1];
+  strlcpy(copy_dentry,path,strlen(path)+1);
+  copy_dentry[strlen(path)] = '\0';
+  for(int i = strlen(path) - 2; i > 0; i--)
   {
-    if(!dir_lookup(search, argument[i], &inode))
-      return NULL;
-  
-    dir_close(search);
-    search = dir_open(inode);
+    if(copy_dentry[i] == '/')
+    {
+      copy_dentry[i] = '\0';
+      copy_success = true;
+      break;
+    }
   }
 
-  *dir = search;
+  if(copy_success == true)
+  {
+    if((cache = find_cache(&dentry_cache, copy_dentry)) != NULL)
+      find = true;
+  }
+
+  if(find == false)
+  {
+    struct dir *search;
+    struct inode *inode;
+    if(absolute == true)
+      search = dir_open_root();
+    else
+      search = dir_open(inode_open(thread_current()->cd));
+
+    /* Check the validity of path */
+    /* 0~i-1 element should be already existed */
+    for(int i = 0; i < count - 1; i++)
+    {
+      if(!dir_lookup(search, argument[i], &inode))
+        return NULL;
+    
+      dir_close(search);
+      search = dir_open(inode);
+    }
+
+    *dir = search;
+  }
+  else
+  {
+    *dir = dir_open(inode_open(cache->sector));
+  }
+
   return path + (argument[count - 1] - copy);
 }
 
@@ -146,6 +180,9 @@ filesys_init (bool format)
 
   inode_init ();
   free_map_init ();
+
+  /* Initialize dentry cache */
+  hash_init(&dentry_cache, dentry_hash_func, dentry_less_func, NULL);
 
   /* Initialize the buffer cache and buffer head */
   buffer_cache = calloc(64,512);
@@ -178,6 +215,19 @@ filesys_done (void)
   }
   free(buffer_cache);
 
+  // struct dentry_cache *v;
+
+  // struct hash_iterator i;
+  // hash_first (&i, &dentry_cache);
+  // while (hash_next (&i))
+  // {
+  //     v = hash_entry (hash_cur (&i), struct dentry_cache, elem);
+  //     hash_delete(&dentry_cache, &v->elem);
+  //     free(v->name);
+  //     free(v);
+  // }
+  // hash_destroy(&dentry_cache, NULL);
+
   free_map_close ();
 }
 
@@ -188,6 +238,9 @@ filesys_done (void)
 bool
 filesys_create (const char *name, off_t initial_size) 
 {
+  if(find_cache(&dentry_cache, name) != NULL)
+    return false;
+
   block_sector_t inode_sector = 0;
   struct dir *dir;
   char *path_name = check_path_validity(name, &dir);
@@ -201,6 +254,16 @@ filesys_create (const char *name, off_t initial_size)
     free_map_release (inode_sector, 1);
   dir_close (dir);
 
+  if(success)
+  {
+    if(name[0] == '/')
+    {
+      /* Add dentry cache */
+      struct dentry_cache *cache = make_cache(inode_sector, name);
+      hash_insert(&dentry_cache, &cache->elem);
+    }
+  }
+
   return success;
 }
 
@@ -212,19 +275,30 @@ filesys_create (const char *name, off_t initial_size)
 struct file *
 filesys_open (const char *name)
 {
-  struct dir *dir;
-  char *path_name = check_path_validity(name, &dir);
-  if(path_name == NULL)
-    return NULL;
+  struct dentry_cache *cache;
+  cache = find_cache(&dentry_cache, name);
   struct inode *inode = NULL;
 
-  if (dir != NULL)
-    if(!dir_lookup (dir, path_name, &inode))
-    {
-      dir_close(dir);
+  if(cache == NULL)
+  {
+    struct dir *dir;
+    char *path_name = check_path_validity(name, &dir);
+    if(path_name == NULL)
       return NULL;
-    }
-  dir_close (dir);
+
+    if (dir != NULL)
+      if(!dir_lookup (dir, path_name, &inode))
+      {
+        dir_close(dir);
+        return NULL;
+      }
+    dir_close (dir);
+  }
+  else
+  {
+    inode = inode_open(cache->sector);
+  }
+
   return file_open (inode);
 }
 
@@ -239,6 +313,14 @@ filesys_remove (const char *name)
   struct dir *dir;
   char *path_name = check_path_validity(name, &dir);
   
+  struct dentry_cache *cache;
+  if((cache = find_cache(&dentry_cache, name)) != NULL)
+  {
+    hash_delete(&dentry_cache, &cache->elem);
+    free(cache->name);
+    free(cache);
+  }
+
   if(path_name == NULL)
     return false;
 
@@ -306,4 +388,20 @@ do_format (void)
     PANIC ("root directory creation failed");
   free_map_close ();
   printf ("done.\n");
+}
+
+/* Calculate where to put the vm_entry into the hash table */
+static unsigned dentry_hash_func(const struct hash_elem *e, void *aux UNUSED)
+{
+  struct dentry_cache *cache = hash_entry(e, struct dentry_cache, elem);
+  return strlen(cache->name);
+}
+
+/* Compare address values of two entered hash_elem */
+static bool dentry_less_func(const struct hash_elem *a, const struct hash_elem *b, void *aux UNUSED)
+{
+  struct dentry_cache *dentry_a = hash_entry(a,struct dentry_cache,elem);
+  struct dentry_cache *dentry_b = hash_entry(b,struct dentry_cache,elem);
+
+  return (strcmp(dentry_a->name, dentry_b->name) != 0) ? true : false;
 }
