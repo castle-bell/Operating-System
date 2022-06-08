@@ -116,31 +116,31 @@ char *check_path_validity(char *path, struct dir **dir)
 
   path_parsing(argument, &count, copy);
 
-  /* Check dentry cache */
-  bool find = false;
-  bool copy_success = false;
-  struct dentry_cache *cache;
-  char copy_dentry[strlen(path) + 1];
-  strlcpy(copy_dentry,path,strlen(path)+1);
-  copy_dentry[strlen(path)] = '\0';
-  for(int i = strlen(path) - 2; i > 0; i--)
-  {
-    if(copy_dentry[i] == '/')
-    {
-      copy_dentry[i] = '\0';
-      copy_success = true;
-      break;
-    }
-  }
+  // /* Check dentry cache */
+  // bool find = false;
+  // bool copy_success = false;
+  // struct dentry_cache *cache;
+  // char copy_dentry[strlen(path) + 1];
+  // strlcpy(copy_dentry,path,strlen(path)+1);
+  // copy_dentry[strlen(path)] = '\0';
+  // for(int i = strlen(path) - 2; i > 0; i--)
+  // {
+  //   if(copy_dentry[i] == '/')
+  //   {
+  //     copy_dentry[i] = '\0';
+  //     copy_success = true;
+  //     break;
+  //   }
+  // }
 
-  if(copy_success == true)
-  {
-    if((cache = find_cache(&dentry_cache, copy_dentry)) != NULL)
-      find = true;
-  }
+  // if(copy_success == true)
+  // {
+  //   if((cache = find_cache(&dentry_cache, copy_dentry)) != NULL)
+  //     find = true;
+  // }
 
-  if(find == false)
-  {
+  // if(find == false)
+  // {
     struct dir *search;
     struct inode *inode;
     if(absolute == true)
@@ -160,11 +160,11 @@ char *check_path_validity(char *path, struct dir **dir)
     }
 
     *dir = search;
-  }
-  else
-  {
-    *dir = dir_open(inode_open(cache->sector));
-  }
+  // }
+  // else
+  // {
+  //   *dir = dir_open(inode_open(cache->sector));
+  // }
 
   return path + (argument[count - 1] - copy);
 }
@@ -238,8 +238,8 @@ filesys_done (void)
 bool
 filesys_create (const char *name, off_t initial_size) 
 {
-  if(find_cache(&dentry_cache, name) != NULL)
-    return false;
+  // if(find_cache(&dentry_cache, name) != NULL)
+  //   return false;
 
   block_sector_t inode_sector = 0;
   struct dir *dir;
@@ -254,15 +254,15 @@ filesys_create (const char *name, off_t initial_size)
     free_map_release (inode_sector, 1);
   dir_close (dir);
 
-  if(success)
-  {
-    if(name[0] == '/')
-    {
-      /* Add dentry cache */
-      struct dentry_cache *cache = make_cache(inode_sector, name);
-      hash_insert(&dentry_cache, &cache->elem);
-    }
-  }
+  // if(success)
+  // {
+  //   if(name[0] == '/')
+  //   {
+  //     /* Add dentry cache */
+  //     struct dentry_cache *cache = make_cache(inode_sector, name);
+  //     hash_insert(&dentry_cache, &cache->elem);
+  //   }
+  // }
 
   return success;
 }
@@ -275,12 +275,12 @@ filesys_create (const char *name, off_t initial_size)
 struct file *
 filesys_open (const char *name)
 {
-  struct dentry_cache *cache;
-  cache = find_cache(&dentry_cache, name);
+  // struct dentry_cache *cache;
+  // cache = find_cache(&dentry_cache, name);
   struct inode *inode = NULL;
 
-  if(cache == NULL)
-  {
+  // if(cache == NULL)
+  // {
     struct dir *dir;
     char *path_name = check_path_validity(name, &dir);
     if(path_name == NULL)
@@ -293,11 +293,11 @@ filesys_open (const char *name)
         return NULL;
       }
     dir_close (dir);
-  }
-  else
-  {
-    inode = inode_open(cache->sector);
-  }
+  // }
+  // else
+  // {
+  //   inode = inode_open(cache->sector);
+  // }
 
   return file_open (inode);
 }
@@ -313,13 +313,13 @@ filesys_remove (const char *name)
   struct dir *dir;
   char *path_name = check_path_validity(name, &dir);
   
-  struct dentry_cache *cache;
-  if((cache = find_cache(&dentry_cache, name)) != NULL)
-  {
-    hash_delete(&dentry_cache, &cache->elem);
-    free(cache->name);
-    free(cache);
-  }
+  // struct dentry_cache *cache;
+  // if((cache = find_cache(&dentry_cache, name)) != NULL)
+  // {
+  //   hash_delete(&dentry_cache, &cache->elem);
+  //   free(cache->name);
+  //   free(cache);
+  // }
 
   if(path_name == NULL)
     return false;

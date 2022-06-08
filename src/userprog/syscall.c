@@ -549,12 +549,12 @@ bool sys_mkdir(const char *dir)
     return false;
   }
 
-  if(dir[0] == '/')
-  {
-    /* Add dentry cache */
-    struct dentry_cache *cache = make_cache(sector, dir);
-    hash_insert(&dentry_cache, &cache->elem);
-  }
+  // if(dir[0] == '/')
+  // {
+  //   /* Add dentry cache */
+  //   struct dentry_cache *cache = make_cache(sector, dir);
+  //   hash_insert(&dentry_cache, &cache->elem);
+  // }
 
 
   dir_close(cur_dir);
